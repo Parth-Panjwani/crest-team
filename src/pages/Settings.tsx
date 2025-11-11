@@ -1,34 +1,42 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { LogOut, Trash2, RefreshCw, Info } from 'lucide-react';
-import { Layout } from '@/components/Layout';
-import { store } from '@/lib/store';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
+import { useNavigate } from "react-router-dom"
+import { motion } from "framer-motion"
+import { LogOut, Trash2, RefreshCw, Info } from "lucide-react"
+import { Layout } from "@/components/Layout"
+import { store } from "@/lib/store"
+import { Button } from "@/components/ui/button"
+import { useToast } from "@/hooks/use-toast"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 export default function Settings() {
-  const user = store.getCurrentUser();
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const user = store.getCurrentUser()
+  const navigate = useNavigate()
+  const { toast } = useToast()
 
   const handleLogout = () => {
-    store.logout();
-    toast({ title: 'Logged Out', description: 'See you soon!' });
-    navigate('/login');
-  };
+    store.logout()
+    toast({ title: "Logged Out", description: "See you soon!" })
+    navigate("/login")
+  }
 
   const handleClearData = () => {
-    store.clearAllData();
-    toast({ 
-      title: 'Data Cleared', 
-      description: 'All local data has been reset',
-      variant: 'destructive'
-    });
-    setShowClearConfirm(false);
-    navigate('/login');
-  };
+    store.clearAllData()
+    toast({
+      title: "Data Cleared",
+      description: "All local data has been reset",
+      variant: "destructive",
+    })
+    navigate("/login")
+  }
 
   return (
     <Layout>
@@ -39,7 +47,9 @@ export default function Settings() {
           className="mb-6"
         >
           <h1 className="text-3xl font-bold mb-2">Settings</h1>
-          <p className="text-muted-foreground">Manage your account and preferences</p>
+          <p className="text-muted-foreground">
+            Manage your account and preferences
+          </p>
         </motion.div>
 
         <div className="space-y-4">
@@ -58,7 +68,7 @@ export default function Settings() {
               <div>
                 <p className="text-sm text-muted-foreground">Role</p>
                 <span className="inline-block px-3 py-1 rounded-full text-sm font-semibold gradient-primary text-primary-foreground">
-                  {user?.role === 'admin' ? 'Administrator' : 'Employee'}
+                  {user?.role === "admin" ? "Administrator" : "Employee"}
                 </span>
               </div>
             </div>
@@ -82,14 +92,36 @@ export default function Settings() {
                 Sync Now
               </Button>
 
-              <Button
-                variant="outline"
-                className="w-full justify-start text-destructive hover:text-destructive"
-                onClick={() => setShowClearConfirm(true)}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Clear All Data
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Clear All Data
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear All Data?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will delete all attendance records, notes, leave
+                      requests, and reset the app to initial state. This action
+                      cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleClearData}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Clear Data
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
               <Button
                 variant="destructive"
@@ -122,51 +154,14 @@ export default function Settings() {
               <div className="flex items-start gap-2 mt-4 p-3 rounded-xl bg-primary/10 border border-primary/20">
                 <Info className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-primary">
-                  This is a Progressive Web App. Install it on your device for the best experience!
+                  This is a Progressive Web App. Install it on your device for
+                  the best experience!
                 </p>
               </div>
             </div>
           </motion.div>
         </div>
-
-        {/* Clear Data Confirmation */}
-        {showClearConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="fixed inset-0 bg-background/90 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setShowClearConfirm(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              onClick={(e) => e.stopPropagation()}
-              className="glass-strong rounded-3xl p-6 max-w-sm shadow-card"
-            >
-              <h3 className="text-xl font-bold mb-3">Clear All Data?</h3>
-              <p className="text-muted-foreground mb-6">
-                This will delete all attendance records, notes, leave requests, and reset the app to initial state. This action cannot be undone.
-              </p>
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowClearConfirm(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleClearData}
-                  className="flex-1"
-                >
-                  Clear Data
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
       </div>
     </Layout>
-  );
+  )
 }
