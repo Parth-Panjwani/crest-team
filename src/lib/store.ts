@@ -33,6 +33,11 @@ export interface Note {
   status: 'pending' | 'done';
   category: 'order' | 'general' | 'reminder';
   adminOnly: boolean;
+  completedBy?: string;
+  completedAt?: Date;
+  deleted?: boolean;
+  deletedAt?: Date;
+  deletedBy?: string;
 }
 
 export interface Leave {
@@ -44,6 +49,52 @@ export interface Leave {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+export interface Advance {
+  id: string;
+  date: string;
+  amount: number;
+  description: string;
+}
+
+export interface StorePurchase {
+  id: string;
+  date: string;
+  amount: number;
+  description: string;
+}
+
+export interface PendingAdvance {
+  id: string;
+  userId: string;
+  date: string;
+  amount: number;
+  description: string;
+  deducted: boolean;
+  deductedInSalaryId?: string;
+  createdAt: string;
+}
+
+export interface PendingStorePurchase {
+  id: string;
+  userId: string;
+  date: string;
+  amount: number;
+  description: string;
+  deducted: boolean;
+  deductedInSalaryId?: string;
+  createdAt: string;
+}
+
+export interface SalaryHistory {
+  id: string;
+  userId: string;
+  date: string;
+  oldBaseSalary: number | null;
+  newBaseSalary: number;
+  changedBy: string;
+  reason?: string;
+}
+
 export interface Salary {
   id: string;
   userId: string;
@@ -53,8 +104,12 @@ export interface Salary {
   hours: number;
   calcPay: number;
   adjustments: number;
+  advances: Advance[];
+  storePurchases: StorePurchase[];
+  totalDeductions: number;
   finalPay: number;
   paid: boolean;
+  paidDate?: string;
   note?: string;
 }
 
@@ -75,6 +130,9 @@ class Store {
   private leaves: Leave[] = [];
   private salaries: Salary[] = [];
   private announcements: Announcement[] = [];
+  private salaryHistory: SalaryHistory[] = [];
+  private pendingAdvances: PendingAdvance[] = [];
+  private pendingStorePurchases: PendingStorePurchase[] = [];
   private currentUser: User | null = null;
 
   constructor() {
@@ -95,8 +153,20 @@ class Store {
           adminOnly: note.adminOnly || false,
         }));
         this.leaves = parsed.leaves || [];
-        this.salaries = parsed.salaries || [];
+        // Handle backward compatibility for salaries
+        this.salaries = (parsed.salaries || []).map((salary: any) => ({
+          ...salary,
+          advances: salary.advances || [],
+          storePurchases: salary.storePurchases || [],
+          totalDeductions: salary.totalDeductions || 0,
+          // Recalculate finalPay if needed
+          finalPay: salary.finalPay !== undefined ? salary.finalPay : 
+            (salary.calcPay || 0) + (salary.adjustments || 0) - (salary.totalDeductions || 0),
+        }));
         this.announcements = parsed.announcements || [];
+        this.salaryHistory = parsed.salaryHistory || [];
+        this.pendingAdvances = parsed.pendingAdvances || [];
+        this.pendingStorePurchases = parsed.pendingStorePurchases || [];
       }
     } catch (error) {
       console.error('Failed to load from storage:', error);
@@ -112,6 +182,9 @@ class Store {
         leaves: this.leaves,
         salaries: this.salaries,
         announcements: this.announcements,
+        salaryHistory: this.salaryHistory,
+        pendingAdvances: this.pendingAdvances,
+        pendingStorePurchases: this.pendingStorePurchases,
       }));
     } catch (error) {
       console.error('Failed to save to storage:', error);
@@ -131,6 +204,8 @@ class Store {
 
   // Auth
   login(pin: string): User | null {
+    // Reload from storage to ensure we have the latest data
+    this.loadFromStorage();
     const user = this.users.find(u => u.pin === pin);
     if (user) {
       this.currentUser = user;
@@ -175,10 +250,28 @@ class Store {
     return user;
   }
 
-  updateUser(id: string, updates: Partial<Omit<User, 'id'>>): User | null {
+  updateUser(id: string, updates: Partial<Omit<User, 'id'>>, reason?: string): User | null {
     const user = this.users.find(u => u.id === id);
     if (user) {
+      // Track salary changes
+      if (updates.baseSalary !== undefined && updates.baseSalary !== user.baseSalary) {
+        const historyEntry: SalaryHistory = {
+          id: Date.now().toString(),
+          userId: id,
+          date: new Date().toISOString(),
+          oldBaseSalary: user.baseSalary || null,
+          newBaseSalary: updates.baseSalary,
+          changedBy: this.currentUser?.id || 'system',
+          reason: reason,
+        };
+        this.salaryHistory.push(historyEntry);
+      }
+      
       Object.assign(user, updates);
+      // If updating the current user, also update the currentUser reference
+      if (this.currentUser?.id === id) {
+        this.currentUser = user;
+      }
       this.saveToStorage();
       return user;
     }
@@ -197,10 +290,17 @@ class Store {
       this.attendance = this.attendance.filter(a => a.userId !== id);
       this.leaves = this.leaves.filter(l => l.userId !== id);
       this.salaries = this.salaries.filter(s => s.userId !== id);
+      this.salaryHistory = this.salaryHistory.filter(sh => sh.userId !== id);
       this.saveToStorage();
       return true;
     }
     return false;
+  }
+
+  getSalaryHistory(userId: string): SalaryHistory[] {
+    return this.salaryHistory
+      .filter(sh => sh.userId === userId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }
 
   // Attendance
@@ -320,13 +420,33 @@ class Store {
     }
   }
 
-  deleteNote(id: string) {
+  deleteNote(id: string, deletedBy?: string) {
+    const note = this.notes.find(n => n.id === id);
+    if (note) {
+      note.deleted = true;
+      note.deletedAt = new Date();
+      note.deletedBy = deletedBy;
+      this.saveToStorage();
+    }
+  }
+
+  restoreNote(id: string) {
+    const note = this.notes.find(n => n.id === id);
+    if (note) {
+      note.deleted = false;
+      note.deletedAt = undefined;
+      note.deletedBy = undefined;
+      this.saveToStorage();
+    }
+  }
+
+  permanentDeleteNote(id: string) {
     this.notes = this.notes.filter(n => n.id !== id);
     this.saveToStorage();
   }
 
   getNotes(status?: 'pending' | 'done', showAdminOnly: boolean = false, currentUserId?: string): Note[] {
-    let filtered = this.notes;
+    let filtered = this.notes.filter(n => !n.deleted); // Exclude deleted notes
     if (status) {
       filtered = filtered.filter(n => n.status === status);
     }
@@ -336,6 +456,26 @@ class Store {
       filtered = filtered.filter(n => !n.adminOnly);
     }
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  getDeletedNotes(userId?: string): Note[] {
+    let filtered = this.notes.filter(n => n.deleted);
+    
+    // If userId provided, show only notes created by that user or deleted by that user
+    // If admin (no userId filter), show all deleted notes
+    if (userId) {
+      const user = this.users.find(u => u.id === userId);
+      if (user?.role !== 'admin') {
+        // Regular users see only their own deleted notes
+        filtered = filtered.filter(n => n.createdBy === userId || n.deletedBy === userId);
+      }
+    }
+    
+    return filtered.sort((a, b) => {
+      const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
+      const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
+      return dateB - dateA;
+    });
   }
 
   // Leave
@@ -377,11 +517,28 @@ class Store {
   }
 
   updateSalary(salary: Salary) {
+    // Calculate total deductions
+    const advances = salary.advances || [];
+    const storePurchases = salary.storePurchases || [];
+    const totalDeductions = advances.reduce((sum, a) => sum + (a.amount || 0), 0) +
+                           storePurchases.reduce((sum, p) => sum + (p.amount || 0), 0);
+    
+    // Calculate final pay (after deductions)
+    const finalPay = salary.calcPay + (salary.adjustments || 0) - totalDeductions;
+    
+    const updatedSalary: Salary = {
+      ...salary,
+      advances,
+      storePurchases,
+      totalDeductions,
+      finalPay,
+    };
+    
     const index = this.salaries.findIndex(s => s.id === salary.id);
     if (index >= 0) {
-      this.salaries[index] = salary;
+      this.salaries[index] = updatedSalary;
     } else {
-      this.salaries.push(salary);
+      this.salaries.push(updatedSalary);
     }
     this.saveToStorage();
   }
@@ -390,8 +547,92 @@ class Store {
     return this.salaries.filter(s => s.month === month);
   }
 
+  getAllSalaries(): Salary[] {
+    return this.salaries.sort((a, b) => {
+      const monthCompare = b.month.localeCompare(a.month);
+      if (monthCompare !== 0) return monthCompare;
+      return b.finalPay - a.finalPay;
+    });
+  }
+
   deleteSalary(id: string) {
     this.salaries = this.salaries.filter(s => s.id !== id);
+    this.saveToStorage();
+  }
+
+  // Pending Advances
+  addPendingAdvance(userId: string, date: string, amount: number, description: string): PendingAdvance {
+    const advance: PendingAdvance = {
+      id: Date.now().toString(),
+      userId,
+      date,
+      amount,
+      description,
+      deducted: false,
+      createdAt: new Date().toISOString(),
+    };
+    this.pendingAdvances.push(advance);
+    this.saveToStorage();
+    return advance;
+  }
+
+  getPendingAdvances(userId?: string): PendingAdvance[] {
+    let filtered = this.pendingAdvances.filter(a => !a.deducted);
+    if (userId) {
+      filtered = filtered.filter(a => a.userId === userId);
+    }
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  markAdvanceAsDeducted(advanceId: string, salaryId: string) {
+    const advance = this.pendingAdvances.find(a => a.id === advanceId);
+    if (advance) {
+      advance.deducted = true;
+      advance.deductedInSalaryId = salaryId;
+      this.saveToStorage();
+    }
+  }
+
+  deletePendingAdvance(id: string) {
+    this.pendingAdvances = this.pendingAdvances.filter(a => a.id !== id);
+    this.saveToStorage();
+  }
+
+  // Pending Store Purchases
+  addPendingStorePurchase(userId: string, date: string, amount: number, description: string): PendingStorePurchase {
+    const purchase: PendingStorePurchase = {
+      id: Date.now().toString(),
+      userId,
+      date,
+      amount,
+      description,
+      deducted: false,
+      createdAt: new Date().toISOString(),
+    };
+    this.pendingStorePurchases.push(purchase);
+    this.saveToStorage();
+    return purchase;
+  }
+
+  getPendingStorePurchases(userId?: string): PendingStorePurchase[] {
+    let filtered = this.pendingStorePurchases.filter(p => !p.deducted);
+    if (userId) {
+      filtered = filtered.filter(p => p.userId === userId);
+    }
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  markStorePurchaseAsDeducted(purchaseId: string, salaryId: string) {
+    const purchase = this.pendingStorePurchases.find(p => p.id === purchaseId);
+    if (purchase) {
+      purchase.deducted = true;
+      purchase.deductedInSalaryId = salaryId;
+      this.saveToStorage();
+    }
+  }
+
+  deletePendingStorePurchase(id: string) {
+    this.pendingStorePurchases = this.pendingStorePurchases.filter(p => p.id !== id);
     this.saveToStorage();
   }
 

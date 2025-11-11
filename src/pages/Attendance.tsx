@@ -233,7 +233,7 @@ export default function Attendance() {
   if (isAdmin) {
     return (
       <Layout>
-        <div className="min-h-screen p-3 md:p-8 max-w-7xl mx-auto overflow-x-hidden">
+        <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -594,7 +594,7 @@ export default function Attendance() {
   // Employee view
   return (
     <Layout>
-      <div className="min-h-screen p-3 md:p-8 max-w-4xl mx-auto overflow-x-hidden">
+      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-4xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}

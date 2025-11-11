@@ -21,6 +21,7 @@ export default function Settings() {
   const user = store.getCurrentUser()
   const navigate = useNavigate()
   const { toast } = useToast()
+  const isAdmin = user?.role === "admin"
 
   const handleLogout = () => {
     store.logout()
@@ -40,7 +41,7 @@ export default function Settings() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-8 max-w-2xl mx-auto">
+      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-2xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -92,36 +93,39 @@ export default function Settings() {
                 Sync Now
               </Button>
 
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Clear All Data
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Clear All Data?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will delete all attendance records, notes, leave
-                      requests, and reset the app to initial state. This action
-                      cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={handleClearData}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              {/* Clear All Data - Admin Only */}
+              {isAdmin && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
-                      Clear Data
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Clear All Data
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Clear All Data?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will delete all attendance records, notes, leave
+                        requests, salaries, and reset the app to initial state.
+                        This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleClearData}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Clear Data
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
 
               <Button
                 variant="destructive"

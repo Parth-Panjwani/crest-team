@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff } from 'lucide-react';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
+import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Note } from '@/lib/store';
 import { Button } from '@/components/ui/button';
@@ -20,17 +21,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function Notes() {
   const user = store.getCurrentUser();
   const isAdmin = user?.role === 'admin';
   const [notes, setNotes] = useState<Note[]>([]);
+  const [deletedNotes, setDeletedNotes] = useState<Note[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'done'>('all');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'order' | 'general' | 'reminder'>('all');
   const [search, setSearch] = useState('');
   const [showAdminOnly, setShowAdminOnly] = useState(false);
+  const [activeTab, setActiveTab] = useState<'notes' | 'recycle'>('notes');
+  const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
+  const [noteToPermanentDelete, setNoteToPermanentDelete] = useState<string | null>(null);
+  const [recycleBinEmployeeFilter, setRecycleBinEmployeeFilter] = useState<string>('all');
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [noteText, setNoteText] = useState('');
   const [noteCategory, setNoteCategory] = useState<'order' | 'general' | 'reminder'>('general');
@@ -39,12 +61,9 @@ export default function Notes() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadNotes();
-  }, [filter, showAdminOnly]);
-
-  const loadNotes = () => {
-    const allNotes = store.getNotes(filter, showAdminOnly, user?.id);
+  const loadNotes = useCallback(() => {
+    const statusFilter = filter === 'all' ? undefined : filter;
+    const allNotes = store.getNotes(statusFilter, showAdminOnly, user?.id);
     let filtered = allNotes;
     
     if (categoryFilter !== 'all') {
@@ -52,11 +71,17 @@ export default function Notes() {
     }
     
     setNotes(filtered);
-  };
+    
+    // Load deleted notes for current user
+    setDeletedNotes(store.getDeletedNotes(user?.id));
+  }, [filter, showAdminOnly, categoryFilter, user?.id]);
 
   useEffect(() => {
     loadNotes();
-  }, [categoryFilter]);
+  }, [loadNotes]);
+
+  // Auto-refresh every 2 seconds
+  useAutoRefresh(loadNotes, 2000);
 
   const handleFormat = (command: string, value?: string) => {
     const textarea = textareaRef.current;
@@ -155,15 +180,46 @@ export default function Notes() {
   };
 
   const handleDelete = (id: string) => {
-    store.deleteNote(id);
-    toast({ title: 'Note Deleted', description: 'Note removed' });
+    store.deleteNote(id, user?.id);
+    toast({ title: 'Note Deleted', description: 'Note moved to recycle bin' });
     loadNotes();
   };
 
+  const handleRestore = (id: string) => {
+    store.restoreNote(id);
+    toast({ title: 'Note Restored', description: 'Note has been restored' });
+    loadNotes();
+  };
+
+  const handlePermanentDelete = (id: string) => {
+    setNoteToPermanentDelete(id);
+    setShowPermanentDeleteDialog(true);
+  };
+
+  const confirmPermanentDelete = () => {
+    if (noteToPermanentDelete) {
+      store.permanentDeleteNote(noteToPermanentDelete);
+      toast({ title: 'Note Permanently Deleted', description: 'Note has been permanently removed', variant: 'destructive' });
+      setNoteToPermanentDelete(null);
+      setShowPermanentDeleteDialog(false);
+      loadNotes();
+    }
+  };
+
   const handleToggleStatus = (note: Note) => {
-    store.updateNote(note.id, { 
-      status: note.status === 'pending' ? 'done' : 'pending' 
-    });
+    const newStatus = note.status === 'pending' ? 'done' : 'pending';
+    if (newStatus === 'done') {
+      // When marking as complete, move to recycle bin
+      store.deleteNote(note.id, user?.id);
+      toast({ title: 'Note Completed', description: 'Note has been moved to recycle bin' });
+    } else {
+      // If restoring from done, just update status
+      store.updateNote(note.id, { 
+        status: newStatus,
+        completedBy: undefined,
+        completedAt: undefined,
+      });
+    }
     loadNotes();
   };
 
@@ -184,45 +240,66 @@ export default function Notes() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto">
+      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-3xl font-bold">Notes</h1>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button
-                onClick={() => {
-                  setEditingNote(null);
-                  setNoteText('');
-                  setNoteCategory('general');
-                  setNoteAdminOnly(false);
-                  setShowEditor(true);
-                }}
-                className="gradient-primary shadow-md hover:shadow-lg"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Note
-              </Button>
-            </motion.div>
-          </div>
+          <div className="flex flex-col gap-4 mb-4">
+            {/* Title and New Note Button Row */}
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold">Notes</h1>
+                <p className="text-sm text-muted-foreground mt-1">Track and manage your notes</p>
+              </div>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button
+                  onClick={() => {
+                    setEditingNote(null);
+                    setNoteText('');
+                    setNoteCategory('general');
+                    setNoteAdminOnly(false);
+                    setShowEditor(true);
+                  }}
+                  className="gradient-primary shadow-md hover:shadow-lg text-sm md:text-base"
+                  size="sm"
+                >
+                  <Plus className="w-4 h-4 md:mr-2" />
+                  <span className="hidden md:inline">New Note</span>
+                </Button>
+              </motion.div>
+            </div>
+            
+            {/* Segmented Control - Same as Attendance */}
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'notes' | 'recycle')} className="w-full">
+              <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+                <TabsTrigger value="notes">Active Notes</TabsTrigger>
+                <TabsTrigger value="recycle" className="relative">
+                  Recycle Bin
+                  {deletedNotes.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-white text-xs rounded-full flex items-center justify-center font-semibold">
+                      {deletedNotes.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
 
-          {/* Search */}
-          <div className="relative mb-4">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search notes..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 glass-card rounded-2xl bg-card text-foreground border border-glass-border"
-            />
-          </div>
+              <TabsContent value="notes" className="space-y-4">
+                {/* Search */}
+                <div className="relative mb-4">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Search notes..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-12 pr-4 py-3 glass-card rounded-2xl bg-card text-foreground border border-glass-border"
+                  />
+                </div>
 
-          {/* Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {/* Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             {/* Status Filter Card */}
             <div className="glass-card rounded-2xl p-4 border-2 border-transparent hover:border-primary/20 transition-all">
               <div className="flex items-center gap-2 mb-3">
@@ -312,6 +389,241 @@ export default function Notes() {
                 </button>
               </div>
             )}
+                </div>
+
+                {/* Notes List */}
+                {filteredNotes.length === 0 ? (
+                  <div className="glass-card rounded-2xl p-12 text-center">
+                    <FileText className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-xl font-semibold mb-2">No Notes</h3>
+                    <p className="text-muted-foreground mb-4">
+                      {filter === 'all' 
+                        ? 'Create your first note' 
+                        : `No ${filter} notes found`}
+                    </p>
+                    <Button
+                      onClick={() => setShowEditor(true)}
+                      variant="outline"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Note
+                    </Button>
+                  </div>
+                ) : (
+                  filteredNotes.map((note, index) => (
+                    <motion.div
+                      key={note.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="glass-card rounded-2xl p-6 hover:shadow-card transition-all"
+                      whileHover={{ scale: 1.01, y: -2 }}
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <motion.button
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={() => handleToggleStatus(note)}
+                            className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                              note.status === 'done'
+                                ? 'bg-success border-success'
+                                : 'border-glass-border hover:border-primary'
+                            }`}
+                          >
+                            {note.status === 'done' && (
+                              <Check className="w-4 h-4 text-background" />
+                            )}
+                          </motion.button>
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${
+                            note.status === 'done'
+                              ? 'bg-success/20 text-success border-success/30'
+                              : 'bg-warning/20 text-warning border-warning/30'
+                          }`}>
+                            {note.status === 'done' ? 'Done' : 'Pending'}
+                          </span>
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category)}`}>
+                            {note.category.charAt(0).toUpperCase() + note.category.slice(1)}
+                          </span>
+                          {note.adminOnly && (
+                            <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/20 text-primary border border-primary/30">
+                              Admin Only
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <motion.button
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={() => handleEdit(note)}
+                            className="text-primary hover:text-primary/80"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={() => handleDelete(note.id)}
+                            className="text-destructive hover:text-destructive/80"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </motion.button>
+                        </div>
+                      </div>
+                      <div 
+                        className={`text-foreground mb-2 whitespace-pre-wrap ${
+                          note.status === 'done' ? 'opacity-60 line-through' : ''
+                        }`}
+                        dangerouslySetInnerHTML={{ __html: formatText(note.text) }}
+                      />
+                      {note.status === 'done' && note.completedBy && note.completedAt && (
+                        <div className="mb-2 p-2 bg-success/10 rounded-lg border border-success/20">
+                          <p className="text-xs text-success font-medium">
+                            Completed by {store.getUserById(note.completedBy)?.name || 'Unknown'} on {new Date(note.completedAt).toLocaleString()}
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center text-xs text-muted-foreground">
+                        <span>
+                          By {store.getAllUsers().find(u => u.id === note.createdBy)?.name}
+                        </span>
+                        <span>
+                          {new Date(note.createdAt).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </TabsContent>
+
+              <TabsContent value="recycle" className="space-y-4">
+                {/* Employee Filter for Recycle Bin */}
+                {isAdmin && deletedNotes.length > 0 && (
+                  <div className="glass-card rounded-2xl p-4 border border-glass-border">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Filter className="w-5 h-5 text-primary" />
+                        <span className="text-sm font-semibold">Filter by Employee:</span>
+                      </div>
+                      <Select
+                        value={recycleBinEmployeeFilter}
+                        onValueChange={setRecycleBinEmployeeFilter}
+                      >
+                        <SelectTrigger className="w-full sm:w-[200px]">
+                          <SelectValue placeholder="All Employees" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Employees</SelectItem>
+                          {store.getAllUsers().filter(u => u.role === 'employee' || u.role === 'admin').map((emp) => (
+                            <SelectItem key={emp.id} value={emp.id}>
+                              {emp.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                {(() => {
+                  const filteredDeletedNotes = recycleBinEmployeeFilter === 'all' || !isAdmin
+                    ? deletedNotes
+                    : deletedNotes.filter(note => 
+                        note.createdBy === recycleBinEmployeeFilter || 
+                        note.deletedBy === recycleBinEmployeeFilter
+                      );
+
+                  return filteredDeletedNotes.length === 0 ? (
+                    <div className="glass-card rounded-2xl p-12 text-center">
+                      <Trash className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <h3 className="text-xl font-semibold mb-2">
+                        {recycleBinEmployeeFilter !== 'all' && isAdmin 
+                          ? 'No deleted notes for this employee' 
+                          : 'Recycle Bin is Empty'}
+                      </h3>
+                      <p className="text-muted-foreground">
+                        {recycleBinEmployeeFilter !== 'all' && isAdmin
+                          ? 'Try selecting a different employee'
+                          : 'Deleted notes will appear here'}
+                      </p>
+                    </div>
+                  ) : (
+                    filteredDeletedNotes.map((note, index) => (
+                      <motion.div
+                        key={note.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="glass-card rounded-2xl p-6 border-2 border-destructive/20 bg-destructive/5"
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category)}`}>
+                              {note.category.charAt(0).toUpperCase() + note.category.slice(1)}
+                            </span>
+                            {note.adminOnly && (
+                              <span className="text-xs font-semibold px-2 py-1 rounded-full border bg-primary/20 text-primary border-primary/30">
+                                Admin Only
+                              </span>
+                            )}
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${
+                              note.status === 'done'
+                                ? 'bg-success/20 text-success border-success/30'
+                                : 'bg-warning/20 text-warning border-warning/30'
+                            }`}>
+                              {note.status === 'done' ? 'Done' : 'Pending'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <motion.button
+                              whileHover={{ scale: 1.1 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={() => handleRestore(note.id)}
+                              className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-all"
+                              title="Restore Note"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </motion.button>
+                            {isAdmin && (
+                              <motion.button
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                                onClick={() => handlePermanentDelete(note.id)}
+                                className="p-2 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all"
+                                title="Permanently Delete"
+                              >
+                                <Trash className="w-4 h-4" />
+                              </motion.button>
+                            )}
+                          </div>
+                        </div>
+                        <div 
+                          className="text-foreground mb-2 whitespace-pre-wrap opacity-60 line-through"
+                          dangerouslySetInnerHTML={{ __html: formatText(note.text) }}
+                        />
+                        <div className="flex justify-between items-center text-xs text-muted-foreground">
+                          <div className="flex flex-col gap-1">
+                            <span>
+                              Created by {store.getAllUsers().find(u => u.id === note.createdBy)?.name} on {new Date(note.createdAt).toLocaleString()}
+                            </span>
+                            {note.deletedBy && note.deletedAt && (
+                              <span className="text-destructive">
+                                Deleted by {store.getUserById(note.deletedBy)?.name || 'Unknown'} on {new Date(note.deletedAt).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  );
+                })()}
+              </TabsContent>
+            </Tabs>
           </div>
         </motion.div>
 
@@ -428,108 +740,26 @@ export default function Notes() {
           </DialogContent>
         </Dialog>
 
-        {/* Notes List */}
-        <div className="space-y-4">
-          {filteredNotes.length === 0 ? (
-            <div className="glass-card rounded-2xl p-12 text-center">
-              <FileText className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <h3 className="text-xl font-semibold mb-2">No Notes</h3>
-              <p className="text-muted-foreground mb-4">
-                {filter === 'all' 
-                  ? 'Create your first note' 
-                  : `No ${filter} notes found`}
-              </p>
-              <Button
-                onClick={() => setShowEditor(true)}
-                variant="outline"
+        {/* Permanent Delete Confirmation Dialog */}
+        <AlertDialog open={showPermanentDeleteDialog} onOpenChange={setShowPermanentDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Permanently Delete Note?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the note from the recycle bin.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmPermanentDelete}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Note
-              </Button>
-            </div>
-          ) : (
-            filteredNotes.map((note, index) => (
-              <motion.div
-                key={note.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="glass-card rounded-2xl p-6 hover:shadow-card transition-all"
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => handleToggleStatus(note)}
-                      className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                        note.status === 'done'
-                          ? 'bg-success border-success'
-                          : 'border-glass-border hover:border-primary'
-                      }`}
-                    >
-                      {note.status === 'done' && (
-                        <Check className="w-4 h-4 text-background" />
-                      )}
-                    </motion.button>
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${
-                      note.status === 'done'
-                        ? 'bg-success/20 text-success border-success/30'
-                        : 'bg-warning/20 text-warning border-warning/30'
-                    }`}>
-                      {note.status === 'done' ? 'Done' : 'Pending'}
-                    </span>
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category)}`}>
-                      {note.category.charAt(0).toUpperCase() + note.category.slice(1)}
-                    </span>
-                    {note.adminOnly && (
-                      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/20 text-primary border border-primary/30">
-                        Admin Only
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => handleEdit(note)}
-                      className="text-primary hover:text-primary/80"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </motion.button>
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => handleDelete(note.id)}
-                      className="text-destructive hover:text-destructive/80"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </motion.button>
-                  </div>
-                </div>
-                <div 
-                  className={`text-foreground mb-2 whitespace-pre-wrap ${
-                    note.status === 'done' ? 'opacity-60 line-through' : ''
-                  }`}
-                  dangerouslySetInnerHTML={{ __html: formatText(note.text) }}
-                />
-                <div className="flex justify-between items-center text-xs text-muted-foreground">
-                  <span>
-                    By {store.getAllUsers().find(u => u.id === note.createdBy)?.name}
-                  </span>
-                  <span>
-                    {new Date(note.createdAt).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
+                Delete Permanently
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </Layout>
   );

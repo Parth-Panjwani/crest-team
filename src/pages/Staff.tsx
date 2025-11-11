@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, Edit, Trash2, Users, Shield, User } from 'lucide-react';
+import { Plus, Edit, Trash2, Users, Shield, User, History, X } from 'lucide-react';
 import { Layout } from '@/components/Layout';
-import { store, User as UserType, Role } from '@/lib/store';
+import { store, User as UserType, Role, SalaryHistory } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -48,7 +48,9 @@ export default function Staff() {
     pin: '',
     role: 'employee' as Role,
     baseSalary: '',
+    salaryChangeReason: '',
   });
+  const [showSalaryHistory, setShowSalaryHistory] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -70,7 +72,7 @@ export default function Staff() {
   };
 
   const handleCreate = () => {
-    setFormData({ name: '', pin: '', role: 'employee', baseSalary: '' });
+    setFormData({ name: '', pin: '', role: 'employee', baseSalary: '', salaryChangeReason: '' });
     setSelectedStaff(null);
     setIsCreateDialogOpen(true);
   };
@@ -81,6 +83,7 @@ export default function Staff() {
       pin: staffMember.pin,
       role: staffMember.role,
       baseSalary: staffMember.baseSalary?.toString() || '',
+      salaryChangeReason: '',
     });
     setSelectedStaff(staffMember);
     setIsEditDialogOpen(true);
@@ -172,15 +175,24 @@ export default function Staff() {
       ? parseFloat(formData.baseSalary) 
       : undefined;
     
+    // Check if salary is being changed
+    const salaryChanged = selectedStaff.baseSalary !== baseSalary;
+    const reason = salaryChanged && formData.salaryChangeReason.trim() 
+      ? formData.salaryChangeReason.trim() 
+      : undefined;
+    
     store.updateUser(selectedStaff.id, {
       name: formData.name,
       pin: formData.pin,
       role: formData.role,
       baseSalary,
-    });
+    }, reason);
+    
     toast({
       title: 'Staff Updated',
-      description: `${formData.name} has been updated successfully`,
+      description: salaryChanged 
+        ? `${formData.name}'s salary has been updated and tracked`
+        : `${formData.name} has been updated successfully`,
     });
     setIsEditDialogOpen(false);
     setSelectedStaff(null);
@@ -225,7 +237,7 @@ export default function Staff() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto">
+      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -280,13 +292,13 @@ export default function Staff() {
                 </thead>
                 <tbody>
                   {staff.map((staffMember, index) => (
-                    <motion.tr
-                      key={staffMember.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="border-b border-glass-border hover:bg-secondary/30 transition-colors"
-                    >
+                    <React.Fragment key={staffMember.id}>
+                      <motion.tr
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="border-b border-glass-border hover:bg-secondary/30 transition-colors"
+                      >
                       <td className="p-4">
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
@@ -324,6 +336,17 @@ export default function Staff() {
                       </td>
                       <td className="p-4">
                         <div className="flex justify-end gap-2">
+                          {staffMember.role === 'employee' && staffMember.baseSalary && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setShowSalaryHistory(showSalaryHistory === staffMember.id ? null : staffMember.id)}
+                              className="h-8 w-8 p-0"
+                              title="View Salary History"
+                            >
+                              <History className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -345,6 +368,76 @@ export default function Staff() {
                         </div>
                       </td>
                     </motion.tr>
+                    {showSalaryHistory === staffMember.id && staffMember.role === 'employee' && (
+                      <tr>
+                        <td colSpan={4} className="p-4 bg-secondary/20">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-semibold flex items-center gap-2">
+                                <History className="w-4 h-4" />
+                                Salary History - {staffMember.name}
+                              </h4>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setShowSalaryHistory(null)}
+                                className="h-6 w-6 p-0"
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                            {(() => {
+                              const history = store.getSalaryHistory(staffMember.id);
+                              return history.length > 0 ? (
+                                <div className="space-y-2">
+                                  {history.map((entry) => (
+                                    <div key={entry.id} className="p-3 bg-card rounded-lg border border-glass-border">
+                                      <div className="flex items-start justify-between mb-2">
+                                        <div className="flex-1">
+                                          <div className="flex items-center gap-3 mb-1">
+                                            <span className="text-sm font-medium">
+                                              {new Date(entry.date).toLocaleDateString('en-US', {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric',
+                                                hour: '2-digit',
+                                                minute: '2-digit'
+                                              })}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                              Changed by: {store.getUserById(entry.changedBy)?.name || 'System'}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-2 text-sm">
+                                            <span className={entry.oldBaseSalary ? 'text-muted-foreground' : 'text-muted-foreground/50'}>
+                                              {entry.oldBaseSalary ? `₹${entry.oldBaseSalary.toLocaleString()}` : 'Not set'}
+                                            </span>
+                                            <span className="text-muted-foreground">→</span>
+                                            <span className="font-semibold text-primary">
+                                              ₹{entry.newBaseSalary.toLocaleString()}
+                                            </span>
+                                          </div>
+                                          {entry.reason && (
+                                            <p className="text-xs text-muted-foreground mt-2 italic">
+                                              Reason: {entry.reason}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-muted-foreground text-center py-4">
+                                  No salary history available. Salary changes will be tracked here.
+                                </p>
+                              );
+                            })()}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -482,21 +575,38 @@ export default function Staff() {
                 </Select>
               </div>
               {formData.role === 'employee' && (
-                <div className="space-y-2">
-                  <Label htmlFor="edit-salary">Base Salary (₹) - Optional</Label>
-                  <Input
-                    id="edit-salary"
-                    type="number"
-                    min="0"
-                    step="100"
-                    placeholder="e.g., 30000"
-                    value={formData.baseSalary}
-                    onChange={(e) => setFormData({ ...formData, baseSalary: e.target.value })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Set the base monthly salary for this employee. Can be updated later in Salary section.
-                  </p>
-                </div>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-salary">Base Salary (₹) - Optional</Label>
+                    <Input
+                      id="edit-salary"
+                      type="number"
+                      min="0"
+                      step="100"
+                      placeholder="e.g., 30000"
+                      value={formData.baseSalary}
+                      onChange={(e) => setFormData({ ...formData, baseSalary: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Set the base monthly salary for this employee. Can be updated later in Salary section.
+                    </p>
+                  </div>
+                  {selectedStaff && formData.baseSalary !== (selectedStaff.baseSalary?.toString() || '') && (
+                    <div className="space-y-2 p-4 bg-primary/10 border border-primary/20 rounded-xl">
+                      <Label htmlFor="salary-reason">Reason for Salary Change (Optional)</Label>
+                      <Input
+                        id="salary-reason"
+                        type="text"
+                        placeholder="e.g., Annual increment, Performance bonus, Promotion"
+                        value={formData.salaryChangeReason}
+                        onChange={(e) => setFormData({ ...formData, salaryChangeReason: e.target.value })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        This change will be tracked in the salary history for record keeping.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <DialogFooter>

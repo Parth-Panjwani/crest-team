@@ -9,6 +9,10 @@ const deserializeTotals = (totals: string) => JSON.parse(totals || '{"workMin":0
 const serializeTotals = (totals: any) => JSON.stringify(totals);
 const deserializeReadBy = (readBy: string) => JSON.parse(readBy || '[]');
 const serializeReadBy = (readBy: string[]) => JSON.stringify(readBy);
+const deserializeAdvances = (advances: string) => JSON.parse(advances || '[]');
+const serializeAdvances = (advances: any[]) => JSON.stringify(advances);
+const deserializeStorePurchases = (purchases: string) => JSON.parse(purchases || '[]');
+const serializeStorePurchases = (purchases: any[]) => JSON.stringify(purchases);
 
 function calculateTotals(punches: any[]) {
   let workMin = 0;
@@ -307,16 +311,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             query += ' AND month = ?';
             params.push(month);
           }
-          const salaries = db.prepare(query).all(...params);
-          return res.json(salaries);
+          const salaries = db.prepare(query).all(...params) as any[];
+          return res.json(salaries.map(salary => ({
+            ...salary,
+            advances: deserializeAdvances(salary.advances),
+            storePurchases: deserializeStorePurchases(salary.storePurchases),
+            paid: Boolean(salary.paid)
+          })));
         }
         if (req.method === 'POST') {
           const salary = req.body;
           const id = salary.id || uuidv4();
-          db.prepare('INSERT OR REPLACE INTO salaries (id, userId, month, type, base, hours, calcPay, adjustments, finalPay, paid, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(id, salary.userId, salary.month, salary.type, salary.base, salary.hours, salary.calcPay, salary.adjustments, salary.finalPay, salary.paid ? 1 : 0, salary.note || null);
-          const result = db.prepare('SELECT * FROM salaries WHERE id = ?').get(id);
-          return res.json(result);
+          
+          // Calculate total deductions
+          const advances = salary.advances || [];
+          const storePurchases = salary.storePurchases || [];
+          const totalDeductions = advances.reduce((sum: number, a: any) => sum + (a.amount || 0), 0) +
+                                  storePurchases.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+          
+          // Calculate final pay (after deductions)
+          const calcPay = salary.type === 'hourly' ? salary.base * salary.hours : salary.base;
+          const finalPay = calcPay + (salary.adjustments || 0) - totalDeductions;
+          
+          db.prepare('INSERT OR REPLACE INTO salaries (id, userId, month, type, base, hours, calcPay, adjustments, advances, storePurchases, totalDeductions, finalPay, paid, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(
+              id,
+              salary.userId,
+              salary.month,
+              salary.type,
+              salary.base,
+              salary.hours || 0,
+              calcPay,
+              salary.adjustments || 0,
+              serializeAdvances(advances),
+              serializeStorePurchases(storePurchases),
+              totalDeductions,
+              finalPay,
+              salary.paid ? 1 : 0,
+              salary.note || null
+            );
+          const result = db.prepare('SELECT * FROM salaries WHERE id = ?').get(id) as any;
+          return res.json({
+            ...result,
+            advances: deserializeAdvances(result.advances),
+            storePurchases: deserializeStorePurchases(result.storePurchases),
+            paid: Boolean(result.paid)
+          });
         }
       }
     }

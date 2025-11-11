@@ -158,7 +158,7 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-3 md:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}

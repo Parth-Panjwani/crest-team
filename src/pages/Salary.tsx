@@ -9,9 +9,16 @@ import {
   Calendar,
   Check,
   X,
+  Minus,
+  ShoppingBag,
+  HandCoins,
+  TrendingUp,
+  Clock,
 } from "lucide-react"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts"
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Layout } from "@/components/Layout"
-import { store, Salary as SalaryType, User } from "@/lib/store"
+import { store, Salary as SalaryType, User, Advance, StorePurchase, PendingAdvance, PendingStorePurchase } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -64,9 +71,13 @@ export default function Salary() {
     base: 0,
     hours: 0,
     adjustments: 0,
+    advances: [] as Advance[],
+    storePurchases: [] as StorePurchase[],
     note: "",
     paid: false,
   })
+  const [newAdvance, setNewAdvance] = useState({ date: "", amount: 0, description: "" })
+  const [newPurchase, setNewPurchase] = useState({ date: "", amount: 0, description: "" })
 
   useEffect(() => {
     if (!user) {
@@ -93,8 +104,11 @@ export default function Salary() {
     hours: number
   ) => {
     const calcPay = data.type === "hourly" ? base * hours : base
-    const finalPay = calcPay + data.adjustments
-    return { calcPay, finalPay }
+    const totalDeductions = 
+      (data.advances || []).reduce((sum, a) => sum + (a.amount || 0), 0) +
+      (data.storePurchases || []).reduce((sum, p) => sum + (p.amount || 0), 0)
+    const finalPay = calcPay + data.adjustments - totalDeductions
+    return { calcPay, totalDeductions, finalPay }
   }
 
   const handleCreate = (employeeId?: string) => {
@@ -103,11 +117,31 @@ export default function Salary() {
       : null
     const baseSalary = employee?.baseSalary || 0
 
+    // Load pending items for this employee
+    const pendingAdvances = employeeId ? store.getPendingAdvances(employeeId) : []
+    const pendingPurchases = employeeId ? store.getPendingStorePurchases(employeeId) : []
+
+    // Convert pending items to salary format
+    const advances: Advance[] = pendingAdvances.map(a => ({
+      id: a.id,
+      date: a.date,
+      amount: a.amount,
+      description: a.description,
+    }))
+    const storePurchases: StorePurchase[] = pendingPurchases.map(p => ({
+      id: p.id,
+      date: p.date,
+      amount: p.amount,
+      description: p.description,
+    }))
+
     setFormData({
       type: "fixed",
       base: baseSalary,
       hours: 0,
       adjustments: 0,
+      advances,
+      storePurchases,
       note: "",
       paid: false,
     })
@@ -119,11 +153,26 @@ export default function Salary() {
   const handleEdit = (salary: SalaryType) => {
     setSelectedSalary(salary)
     setSelectedEmployee(salary.userId)
+    
+    // Load existing advances and purchases from salary
+    const existingAdvances = salary.advances || []
+    const existingPurchases = salary.storePurchases || []
+    
+    // Also load any pending items that haven't been added yet
+    const pendingAdvances = store.getPendingAdvances(salary.userId)
+    const pendingPurchases = store.getPendingStorePurchases(salary.userId)
+    
+    // Merge existing with any new pending items (in case user wants to add more)
+    const allAdvances = [...existingAdvances]
+    const allPurchases = [...existingPurchases]
+    
     setFormData({
       type: salary.type,
       base: salary.base,
       hours: salary.hours,
       adjustments: salary.adjustments,
+      advances: allAdvances,
+      storePurchases: allPurchases,
       note: salary.note || "",
       paid: salary.paid,
     })
@@ -163,7 +212,7 @@ export default function Salary() {
       return
     }
 
-    const { calcPay, finalPay } = calculateSalary(
+    const { calcPay, totalDeductions, finalPay } = calculateSalary(
       formData,
       formData.base,
       formData.hours
@@ -178,15 +227,34 @@ export default function Salary() {
       hours: formData.type === "hourly" ? formData.hours : 0,
       calcPay,
       adjustments: formData.adjustments,
+      advances: formData.advances,
+      storePurchases: formData.storePurchases,
+      totalDeductions,
       finalPay,
       paid: formData.paid,
+      paidDate: formData.paid ? new Date().toISOString() : undefined,
       note: formData.note || undefined,
     }
 
     store.updateSalary(salary)
+    
+    // Mark pending items as deducted
+    formData.advances.forEach(advance => {
+      const pendingAdvance = store.getPendingAdvances(selectedEmployee).find(a => a.id === advance.id)
+      if (pendingAdvance) {
+        store.markAdvanceAsDeducted(advance.id, salary.id)
+      }
+    })
+    formData.storePurchases.forEach(purchase => {
+      const pendingPurchase = store.getPendingStorePurchases(selectedEmployee).find(p => p.id === purchase.id)
+      if (pendingPurchase) {
+        store.markStorePurchaseAsDeducted(purchase.id, salary.id)
+      }
+    })
+    
     toast({
       title: "Salary Created",
-      description: `Salary record created successfully`,
+      description: `Salary record created successfully${formData.advances.length > 0 || formData.storePurchases.length > 0 ? '. Pending deductions have been applied.' : ''}`,
     })
     setIsCreateDialogOpen(false)
     loadData()
@@ -213,7 +281,7 @@ export default function Salary() {
       return
     }
 
-    const { calcPay, finalPay } = calculateSalary(
+    const { calcPay, totalDeductions, finalPay } = calculateSalary(
       formData,
       formData.base,
       formData.hours
@@ -226,14 +294,37 @@ export default function Salary() {
       hours: formData.type === "hourly" ? formData.hours : 0,
       calcPay,
       adjustments: formData.adjustments,
+      advances: formData.advances,
+      storePurchases: formData.storePurchases,
+      totalDeductions,
       finalPay,
       paid: formData.paid,
+      paidDate: formData.paid && !selectedSalary.paidDate ? new Date().toISOString() : selectedSalary.paidDate,
       note: formData.note || undefined,
+    })
+
+    // Mark newly added pending items as deducted
+    const existingAdvanceIds = (selectedSalary.advances || []).map(a => a.id)
+    const newAdvances = formData.advances.filter(a => !existingAdvanceIds.includes(a.id))
+    newAdvances.forEach(advance => {
+      const pendingAdvance = store.getPendingAdvances(selectedSalary.userId).find(a => a.id === advance.id)
+      if (pendingAdvance) {
+        store.markAdvanceAsDeducted(advance.id, selectedSalary.id)
+      }
+    })
+    
+    const existingPurchaseIds = (selectedSalary.storePurchases || []).map(p => p.id)
+    const newPurchases = formData.storePurchases.filter(p => !existingPurchaseIds.includes(p.id))
+    newPurchases.forEach(purchase => {
+      const pendingPurchase = store.getPendingStorePurchases(selectedSalary.userId).find(p => p.id === purchase.id)
+      if (pendingPurchase) {
+        store.markStorePurchaseAsDeducted(purchase.id, selectedSalary.id)
+      }
     })
 
     toast({
       title: "Salary Updated",
-      description: `Salary record updated successfully`,
+      description: `Salary record updated successfully${newAdvances.length > 0 || newPurchases.length > 0 ? '. New deductions have been applied.' : ''}`,
     })
     setIsEditDialogOpen(false)
     setSelectedSalary(null)
@@ -255,6 +346,64 @@ export default function Salary() {
     loadData()
   }
 
+  const addAdvance = () => {
+    if (!newAdvance.date || newAdvance.amount <= 0 || !newAdvance.description.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all fields for advance",
+        variant: "destructive",
+      })
+      return
+    }
+    const advance: Advance = {
+      id: Date.now().toString(),
+      date: newAdvance.date,
+      amount: newAdvance.amount,
+      description: newAdvance.description,
+    }
+    setFormData({
+      ...formData,
+      advances: [...formData.advances, advance],
+    })
+    setNewAdvance({ date: "", amount: 0, description: "" })
+  }
+
+  const removeAdvance = (id: string) => {
+    setFormData({
+      ...formData,
+      advances: formData.advances.filter((a) => a.id !== id),
+    })
+  }
+
+  const addStorePurchase = () => {
+    if (!newPurchase.date || newPurchase.amount <= 0 || !newPurchase.description.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all fields for store purchase",
+        variant: "destructive",
+      })
+      return
+    }
+    const purchase: StorePurchase = {
+      id: Date.now().toString(),
+      date: newPurchase.date,
+      amount: newPurchase.amount,
+      description: newPurchase.description,
+    }
+    setFormData({
+      ...formData,
+      storePurchases: [...formData.storePurchases, purchase],
+    })
+    setNewPurchase({ date: "", amount: 0, description: "" })
+  }
+
+  const removeStorePurchase = (id: string) => {
+    setFormData({
+      ...formData,
+      storePurchases: formData.storePurchases.filter((p) => p.id !== id),
+    })
+  }
+
   const currentSalary = !isAdmin
     ? store.getSalary(user?.id || "", selectedMonth)
     : null
@@ -273,11 +422,39 @@ export default function Salary() {
         )
       : 0
 
+  // Get all salaries for charts (last 6 months)
+  const allSalaries = store.getAllSalaries()
+  const last6Months = Array.from({ length: 6 }, (_, i) => {
+    const date = new Date()
+    date.setMonth(date.getMonth() - i)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
+  }).reverse()
+
+  const chartData = last6Months.map(month => {
+    const monthSalaries = allSalaries.filter(s => s.month === month)
+    return {
+      month: new Date(month + "-01").toLocaleDateString("en-US", { month: "short" }),
+      paid: monthSalaries.reduce((sum, s) => sum + (s.paid ? s.finalPay : 0), 0),
+      pending: monthSalaries.reduce((sum, s) => sum + (!s.paid ? s.finalPay : 0), 0),
+      total: monthSalaries.reduce((sum, s) => sum + s.finalPay, 0),
+    }
+  })
+
+  const employeeChartData = employees.map(emp => {
+    const empSalary = salaries.find(s => s.userId === emp.id)
+    return {
+      name: emp.name.split(' ')[0],
+      amount: empSalary?.finalPay || 0,
+      paid: empSalary?.paid ? empSalary.finalPay : 0,
+      pending: empSalary && !empSalary.paid ? empSalary.finalPay : 0,
+    }
+  }).filter(d => d.amount > 0)
+
   if (!user) return null
 
   return (
     <Layout>
-      <div className="min-h-screen p-3 md:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -586,7 +763,7 @@ export default function Salary() {
 
         {/* Create Dialog */}
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add Salary Record</DialogTitle>
               <DialogDescription>
@@ -775,8 +952,20 @@ export default function Salary() {
                       ).calcPay.toLocaleString()}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">Final Pay:</span>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-muted-foreground">Adjustments:</span>
+                    <span className={`font-semibold ${formData.adjustments > 0 ? 'text-success' : formData.adjustments < 0 ? 'text-destructive' : ''}`}>
+                      {formData.adjustments > 0 ? '+' : ''}₹{formData.adjustments.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mb-2 border-t border-glass-border pt-2">
+                    <span className="text-muted-foreground">Total Deductions:</span>
+                    <span className="font-semibold text-destructive">
+                      ₹{calculateSalary(formData, formData.base, formData.hours).totalDeductions.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-glass-border pt-2">
+                    <span className="text-muted-foreground font-semibold">Final Pay:</span>
                     <span className="text-2xl font-bold text-primary">
                       ₹
                       {calculateSalary(
@@ -808,7 +997,7 @@ export default function Salary() {
 
         {/* Edit Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Salary Record</DialogTitle>
               <DialogDescription>
@@ -883,6 +1072,243 @@ export default function Salary() {
                   }
                   placeholder="Positive for bonus, negative for deduction"
                 />
+              </div>
+
+              {/* Pending Items Section */}
+              {selectedEmployee && (() => {
+                const pendingAdvances = store.getPendingAdvances(selectedEmployee)
+                const pendingPurchases = store.getPendingStorePurchases(selectedEmployee)
+                const addedAdvanceIds = formData.advances.map(a => a.id)
+                const addedPurchaseIds = formData.storePurchases.map(p => p.id)
+                const unaddedAdvances = pendingAdvances.filter(a => !addedAdvanceIds.includes(a.id))
+                const unaddedPurchases = pendingPurchases.filter(p => !addedPurchaseIds.includes(p.id))
+                
+                if (unaddedAdvances.length === 0 && unaddedPurchases.length === 0) {
+                  return null
+                }
+                
+                return (
+                  <div className="space-y-3 p-4 border-2 border-primary/30 rounded-xl bg-primary/5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-base font-semibold">Pending Items to Add</Label>
+                      <span className="text-xs text-muted-foreground">
+                        Click to add to this salary
+                      </span>
+                    </div>
+                    
+                    {unaddedAdvances.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Pending Advances:</p>
+                        {unaddedAdvances.map(advance => (
+                          <button
+                            key={advance.id}
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                advances: [...formData.advances, {
+                                  id: advance.id,
+                                  date: advance.date,
+                                  amount: advance.amount,
+                                  description: advance.description,
+                                }],
+                              })
+                            }}
+                            className="w-full text-left p-2 bg-card rounded-lg border border-glass-border hover:border-primary/50 hover:bg-primary/5 transition-all"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{advance.description}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(advance.date).toLocaleDateString()} • ₹{advance.amount.toLocaleString()}
+                                </p>
+                              </div>
+                              <Plus className="w-4 h-4 text-primary flex-shrink-0 ml-2" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {unaddedPurchases.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Pending Store Purchases:</p>
+                        {unaddedPurchases.map(purchase => (
+                          <button
+                            key={purchase.id}
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                storePurchases: [...formData.storePurchases, {
+                                  id: purchase.id,
+                                  date: purchase.date,
+                                  amount: purchase.amount,
+                                  description: purchase.description,
+                                }],
+                              })
+                            }}
+                            className="w-full text-left p-2 bg-card rounded-lg border border-glass-border hover:border-accent/50 hover:bg-accent/5 transition-all"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{purchase.description}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(purchase.date).toLocaleDateString()} • ₹{purchase.amount.toLocaleString()}
+                                </p>
+                              </div>
+                              <Plus className="w-4 h-4 text-accent flex-shrink-0 ml-2" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* Advances Section */}
+              <div className="space-y-3 p-4 border-2 border-glass-border rounded-xl bg-secondary/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <HandCoins className="w-5 h-5 text-primary" />
+                    <Label className="text-base font-semibold">Advances (Borrowed Money)</Label>
+                  </div>
+                  <span className="text-sm font-semibold text-destructive">
+                    Total: ₹{formData.advances.reduce((sum, a) => sum + a.amount, 0).toLocaleString()}
+                  </span>
+                </div>
+                
+                <div className="space-y-2">
+                  {formData.advances.map((advance) => (
+                    <div key={advance.id} className="flex items-center gap-2 p-2 bg-card rounded-lg border border-glass-border">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-medium">{new Date(advance.date).toLocaleDateString()}</span>
+                          <span className="text-destructive font-semibold">₹{advance.amount.toLocaleString()}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{advance.description}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={() => removeAdvance(advance.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Input
+                    type="date"
+                    value={newAdvance.date}
+                    onChange={(e) => setNewAdvance({ ...newAdvance, date: e.target.value })}
+                    className="text-sm"
+                    placeholder="Date"
+                  />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={newAdvance.amount || ""}
+                    onChange={(e) => setNewAdvance({ ...newAdvance, amount: parseFloat(e.target.value) || 0 })}
+                    placeholder="Amount"
+                    className="text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={newAdvance.description}
+                      onChange={(e) => setNewAdvance({ ...newAdvance, description: e.target.value })}
+                      placeholder="Description"
+                      className="text-sm flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={addAdvance}
+                      className="gradient-primary"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Store Purchases Section */}
+              <div className="space-y-3 p-4 border-2 border-glass-border rounded-xl bg-secondary/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShoppingBag className="w-5 h-5 text-accent" />
+                    <Label className="text-base font-semibold">Store Purchases</Label>
+                  </div>
+                  <span className="text-sm font-semibold text-destructive">
+                    Total: ₹{formData.storePurchases.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}
+                  </span>
+                </div>
+                
+                <div className="space-y-2">
+                  {formData.storePurchases.map((purchase) => (
+                    <div key={purchase.id} className="flex items-center gap-2 p-2 bg-card rounded-lg border border-glass-border">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-medium">{new Date(purchase.date).toLocaleDateString()}</span>
+                          <span className="text-destructive font-semibold">₹{purchase.amount.toLocaleString()}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{purchase.description}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={() => removeStorePurchase(purchase.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Input
+                    type="date"
+                    value={newPurchase.date}
+                    onChange={(e) => setNewPurchase({ ...newPurchase, date: e.target.value })}
+                    className="text-sm"
+                    placeholder="Date"
+                  />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={newPurchase.amount || ""}
+                    onChange={(e) => setNewPurchase({ ...newPurchase, amount: parseFloat(e.target.value) || 0 })}
+                    placeholder="Amount"
+                    className="text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={newPurchase.description}
+                      onChange={(e) => setNewPurchase({ ...newPurchase, description: e.target.value })}
+                      placeholder="Description"
+                      className="text-sm flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={addStorePurchase}
+                      className="gradient-primary"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-2">

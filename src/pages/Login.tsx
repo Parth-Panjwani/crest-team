@@ -60,13 +60,13 @@ export default function Login() {
   }, [pin, handleDigit, handleDelete, handleLogin])
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-secondary/30 to-secondary/50">
+    <div className="fixed inset-0 flex items-center justify-center p-4 bg-gradient-to-br from-background via-secondary/30 to-secondary/50 overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-md"
+        className="w-full max-w-md my-auto"
       >
-        <div className="glass-strong rounded-3xl p-8 shadow-card">
+        <div className="glass-strong rounded-3xl p-6 md:p-8 shadow-card">
           {/* Logo/Header */}
           <div className="text-center mb-8">
             <motion.div
