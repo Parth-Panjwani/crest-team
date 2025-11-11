@@ -1,47 +1,66 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Delete, LogIn } from 'lucide-react';
-import { store } from '@/lib/store';
-import { useToast } from '@/hooks/use-toast';
-import { Button } from '@/components/ui/button';
+import { useState, useEffect, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
+import { motion } from "framer-motion"
+import { Delete, LogIn } from "lucide-react"
+import { store } from "@/lib/store"
+import { useToast } from "@/hooks/use-toast"
+import { Button } from "@/components/ui/button"
 
 export default function Login() {
-  const [pin, setPin] = useState('');
-  const [remember, setRemember] = useState(false);
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const [pin, setPin] = useState("")
+  const [remember, setRemember] = useState(false)
+  const navigate = useNavigate()
+  const { toast } = useToast()
 
-  const handleDigit = (digit: string) => {
-    if (pin.length < 6) {
-      setPin(pin + digit);
-    }
-  };
+  const handleDigit = useCallback((digit: string) => {
+    setPin((prev) => {
+      if (prev.length < 4) {
+        return prev + digit
+      }
+      return prev
+    })
+  }, [])
 
-  const handleDelete = () => {
-    setPin(pin.slice(0, -1));
-  };
+  const handleDelete = useCallback(() => {
+    setPin((prev) => prev.slice(0, -1))
+  }, [])
 
-  const handleLogin = () => {
-    const user = store.login(pin);
+  const handleLogin = useCallback(() => {
+    const user = store.login(pin)
     if (user) {
       toast({
-        title: 'Welcome back!',
+        title: "Welcome back!",
         description: `Logged in as ${user.name}`,
-      });
-      navigate('/dashboard');
+      })
+      navigate("/dashboard")
     } else {
       toast({
-        title: 'Invalid PIN',
-        description: 'Please try again',
-        variant: 'destructive',
-      });
-      setPin('');
+        title: "Invalid PIN",
+        description: "Please try again",
+        variant: "destructive",
+      })
+      setPin("")
     }
-  };
+  }, [pin, navigate, toast])
+
+  // Handle keyboard input for desktop
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key >= "0" && e.key <= "9") {
+        handleDigit(e.key)
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        handleDelete()
+      } else if (e.key === "Enter" && pin.length === 4) {
+        handleLogin()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyPress)
+    return () => window.removeEventListener("keydown", handleKeyPress)
+  }, [pin, handleDigit, handleDelete, handleLogin])
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background to-secondary">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-secondary/30 to-secondary/50">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -54,13 +73,24 @@ export default function Login() {
               initial={{ y: -20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="mb-4"
+              className="mb-6"
             >
-              <div className="w-20 h-20 mx-auto rounded-2xl gradient-primary flex items-center justify-center glow-primary">
-                <LogIn className="w-10 h-10 text-primary-foreground" />
+              <div className="flex items-center justify-center mb-4">
+                <div className="flex items-center justify-center p-6 rounded-2xl bg-white border-2 border-border shadow-md w-full max-w-[240px] mx-auto">
+                  <img
+                    src="/logo.png"
+                    alt="Company Logo"
+                    className="h-38 w-full object-contain"
+                    style={{ display: "block" }}
+                    onError={(e) => {
+                      console.error("Logo failed to load")
+                      ;(e.target as HTMLImageElement).style.display = "none"
+                    }}
+                  />
+                </div>
               </div>
             </motion.div>
-            <h1 className="text-3xl font-bold mb-2">Employee Hub</h1>
+            <h1 className="text-3xl font-bold mb-2">Shree Panjwani Traders</h1>
             <p className="text-muted-foreground">Enter your PIN to continue</p>
           </div>
 
@@ -72,7 +102,7 @@ export default function Login() {
             className="mb-8"
           >
             <div className="flex justify-center gap-3 mb-6">
-              {[0, 1, 2, 3, 4, 5].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <motion.div
                   key={i}
                   animate={{
@@ -80,8 +110,8 @@ export default function Login() {
                   }}
                   className={`w-12 h-12 rounded-xl border-2 flex items-center justify-center ${
                     i < pin.length
-                      ? 'border-primary bg-primary/20 glow-primary'
-                      : 'border-glass-border bg-secondary/30'
+                      ? "border-primary bg-primary/20"
+                      : "border-glass-border bg-secondary/30"
                   }`}
                 >
                   {i < pin.length && (
@@ -103,7 +133,9 @@ export default function Login() {
                 onChange={(e) => setRemember(e.target.checked)}
                 className="w-4 h-4 rounded border-glass-border"
               />
-              <span className="text-sm text-muted-foreground">Remember this device</span>
+              <span className="text-sm text-muted-foreground">
+                Remember this device
+              </span>
             </label>
           </motion.div>
 
@@ -136,7 +168,7 @@ export default function Login() {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => handleDigit('0')}
+              onClick={() => handleDigit("0")}
               className="h-16 rounded-xl glass-card hover:bg-secondary/70 text-xl font-semibold transition-all"
             >
               0
@@ -146,23 +178,13 @@ export default function Login() {
               whileTap={{ scale: 0.95 }}
               onClick={handleLogin}
               disabled={pin.length < 4}
-              className="h-16 rounded-xl gradient-primary text-primary-foreground font-semibold flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed glow-primary transition-all"
+              className="h-16 rounded-xl gradient-primary text-primary-foreground font-semibold flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg"
             >
               <LogIn className="w-6 h-6" />
             </motion.button>
           </motion.div>
-
-          {/* Demo Hint */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            className="text-center text-xs text-muted-foreground"
-          >
-            Demo PINs: Admin (1234), Employee (5678 or 9012)
-          </motion.div>
         </div>
       </motion.div>
     </div>
-  );
+  )
 }

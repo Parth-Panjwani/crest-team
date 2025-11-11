@@ -1,4 +1,4 @@
-// Local storage wrapper for app data
+// Type definitions for app data
 export type Role = 'admin' | 'employee';
 
 export interface User {
@@ -6,6 +6,7 @@ export interface User {
   name: string;
   role: Role;
   pin: string;
+  baseSalary?: number;
 }
 
 export interface Punch {
@@ -30,6 +31,8 @@ export interface Note {
   createdBy: string;
   createdAt: Date;
   status: 'pending' | 'done';
+  category: 'order' | 'general' | 'reminder';
+  adminOnly: boolean;
 }
 
 export interface Leave {
@@ -86,7 +89,11 @@ class Store {
         const parsed = JSON.parse(data);
         this.users = parsed.users || [];
         this.attendance = parsed.attendance || [];
-        this.notes = parsed.notes || [];
+        this.notes = (parsed.notes || []).map((note: any) => ({
+          ...note,
+          category: note.category || 'general',
+          adminOnly: note.adminOnly || false,
+        }));
         this.leaves = parsed.leaves || [];
         this.salaries = parsed.salaries || [];
         this.announcements = parsed.announcements || [];
@@ -115,8 +122,8 @@ class Store {
     if (this.users.length === 0) {
       this.users = [
         { id: '1', name: 'Store Owner', role: 'admin', pin: '1234' },
-        { id: '2', name: 'Alice Johnson', role: 'employee', pin: '5678' },
-        { id: '3', name: 'Bob Smith', role: 'employee', pin: '9012' },
+        { id: '2', name: 'Alice Johnson', role: 'employee', pin: '5678', baseSalary: 30000 },
+        { id: '3', name: 'Bob Smith', role: 'employee', pin: '9012', baseSalary: 35000 },
       ];
       this.saveToStorage();
     }
@@ -151,6 +158,51 @@ class Store {
     return this.users;
   }
 
+  getUserById(id: string): User | null {
+    return this.users.find(u => u.id === id) || null;
+  }
+
+  createUser(name: string, role: Role, pin: string, baseSalary?: number): User {
+    const user: User = {
+      id: Date.now().toString(),
+      name,
+      role,
+      pin,
+      baseSalary
+    };
+    this.users.push(user);
+    this.saveToStorage();
+    return user;
+  }
+
+  updateUser(id: string, updates: Partial<Omit<User, 'id'>>): User | null {
+    const user = this.users.find(u => u.id === id);
+    if (user) {
+      Object.assign(user, updates);
+      this.saveToStorage();
+      return user;
+    }
+    return null;
+  }
+
+  deleteUser(id: string): boolean {
+    const index = this.users.findIndex(u => u.id === id);
+    if (index >= 0) {
+      // Prevent deleting the current user
+      if (this.currentUser?.id === id) {
+        return false;
+      }
+      this.users.splice(index, 1);
+      // Also clean up related data
+      this.attendance = this.attendance.filter(a => a.userId !== id);
+      this.leaves = this.leaves.filter(l => l.userId !== id);
+      this.salaries = this.salaries.filter(s => s.userId !== id);
+      this.saveToStorage();
+      return true;
+    }
+    return false;
+  }
+
   // Attendance
   getTodayAttendance(userId: string): Attendance | null {
     const today = new Date().toISOString().split('T')[0];
@@ -159,6 +211,31 @@ class Store {
 
   punch(userId: string, type: Punch['type']) {
     const today = new Date().toISOString().split('T')[0];
+    
+    // Check if user has an open attendance from a previous day
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    const yesterdayAtt = this.attendance.find(a => 
+      a.userId === userId && 
+      a.date === yesterdayStr &&
+      a.punches.length > 0 &&
+      a.punches[a.punches.length - 1].type !== 'OUT'
+    );
+    
+    // If user was checked in from yesterday and checking in today, auto-checkout yesterday
+    if (yesterdayAtt && type === 'IN') {
+      const lastPunch = yesterdayAtt.punches[yesterdayAtt.punches.length - 1];
+      if (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END') {
+        // Auto-checkout at midnight (end of previous day)
+        const midnight = new Date(yesterdayStr);
+        midnight.setHours(23, 59, 59, 999);
+        yesterdayAtt.punches.push({ at: midnight, type: 'OUT' });
+        this.calculateTotals(yesterdayAtt);
+      }
+    }
+    
     let att = this.attendance.find(a => a.userId === userId && a.date === today);
     
     if (!att) {
@@ -220,13 +297,15 @@ class Store {
   }
 
   // Notes
-  addNote(text: string, userId: string): Note {
+  addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false): Note {
     const note: Note = {
       id: Date.now().toString(),
       text,
       createdBy: userId,
       createdAt: new Date(),
-      status: 'pending'
+      status: 'pending',
+      category,
+      adminOnly
     };
     this.notes.push(note);
     this.saveToStorage();
@@ -246,10 +325,15 @@ class Store {
     this.saveToStorage();
   }
 
-  getNotes(status?: 'pending' | 'done'): Note[] {
+  getNotes(status?: 'pending' | 'done', showAdminOnly: boolean = false, currentUserId?: string): Note[] {
     let filtered = this.notes;
     if (status) {
       filtered = filtered.filter(n => n.status === status);
+    }
+    // Filter admin-only notes based on user role and showAdminOnly flag
+    const currentUser = currentUserId ? this.users.find(u => u.id === currentUserId) : null;
+    if (currentUser?.role !== 'admin' || !showAdminOnly) {
+      filtered = filtered.filter(n => !n.adminOnly);
     }
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -293,7 +377,7 @@ class Store {
   }
 
   updateSalary(salary: Salary) {
-    const index = this.salaries.findIndex(s => s.userId === salary.userId && s.month === salary.month);
+    const index = this.salaries.findIndex(s => s.id === salary.id);
     if (index >= 0) {
       this.salaries[index] = salary;
     } else {
@@ -304,6 +388,11 @@ class Store {
 
   getSalariesForMonth(month: string): Salary[] {
     return this.salaries.filter(s => s.month === month);
+  }
+
+  deleteSalary(id: string) {
+    this.salaries = this.salaries.filter(s => s.id !== id);
+    this.saveToStorage();
   }
 
   // Announcements

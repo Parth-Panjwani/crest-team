@@ -6,10 +6,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
-import OrderPad from "./pages/OrderPad";
+import Notes from "./pages/Notes";
 import Leave from "./pages/Leave";
 import Salary from "./pages/Salary";
 import Settings from "./pages/Settings";
+import Staff from "./pages/Staff";
 import NotFound from "./pages/NotFound";
 import { store } from "./lib/store";
 
@@ -26,10 +27,12 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/attendance" element={<Attendance />} />
-          <Route path="/order-pad" element={<OrderPad />} />
+          <Route path="/notes" element={<Notes />} />
+          <Route path="/order-pad" element={<Notes />} />
           <Route path="/leave" element={<Leave />} />
           <Route path="/salary" element={<Salary />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/staff" element={<Staff />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

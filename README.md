@@ -62,7 +62,21 @@ This project is built with:
 
 ## How can I deploy this project?
 
-Simply open [Lovable](https://lovable.dev/projects/8f8e8f7d-0020-49a3-975e-e69ac28b26c5) and click on Share -> Publish.
+### Quick Deploy (Recommended)
+
+Deploy everything to Vercel - both frontend and backend in one deployment!
+
+1. **Deploy to Vercel**: See `DEPLOY_QUICKSTART.md` for 3-minute setup guide
+2. Everything works out of the box - no separate backend needed!
+
+Quick start: See `DEPLOY_QUICKSTART.md` for instant deployment.
+
+### Alternative: Lovable Deploy
+
+For simple static deployment (no real-time features):
+- Open [Lovable](https://lovable.dev/projects/8f8e8f7d-0020-49a3-975e-e69ac28b26c5) and click on Share -> Publish.
+
+**Note**: Lovable deploy won't include the backend API. Use Vercel for full functionality with both frontend and backend.
 
 ## Can I connect a custom domain to my Lovable project?
 

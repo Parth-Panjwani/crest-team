@@ -82,7 +82,7 @@ export default function OrderPad() {
                   setNoteText('');
                   setShowEditor(true);
                 }}
-                className="gradient-primary glow-primary"
+                className="gradient-primary shadow-md hover:shadow-lg"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 New Note
@@ -155,7 +155,7 @@ export default function OrderPad() {
                   <Button
                     onClick={handleSave}
                     disabled={!noteText.trim()}
-                    className="gradient-primary glow-primary"
+                    className="gradient-primary shadow-md hover:shadow-lg"
                   >
                     Save Note
                   </Button>

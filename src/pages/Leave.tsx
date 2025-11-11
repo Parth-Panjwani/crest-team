@@ -79,7 +79,7 @@ export default function Leave() {
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
                   onClick={() => setShowForm(!showForm)}
-                  className="gradient-primary glow-primary"
+                  className="gradient-primary shadow-md hover:shadow-lg"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   Apply Leave
@@ -149,7 +149,7 @@ export default function Leave() {
                   </Button>
                   <Button
                     onClick={handleSubmit}
-                    className="gradient-primary glow-primary"
+                    className="gradient-primary shadow-md hover:shadow-lg"
                   >
                     Submit Request
                   </Button>
