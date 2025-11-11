@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import db from '../../../api/db.js';
+import db from '../../db.js';
 
 const deserializeReadBy = (readBy: string) => JSON.parse(readBy || '[]');
 const serializeReadBy = (readBy: string[]) => JSON.stringify(readBy);

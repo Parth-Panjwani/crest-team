@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import db from '../../api/db.js';
+import db from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const deserializeReadBy = (readBy: string) => JSON.parse(readBy || '[]');
