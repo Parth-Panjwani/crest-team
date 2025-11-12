@@ -371,6 +371,27 @@ const handleAttendance: ApiHandler = async (req, res, context) => {
     return json(res, 200, attendances.map(formatAttendance));
   }
 
+  if (action === 'clear') {
+    if (context.method !== 'DELETE') {
+      return methodNotAllowed(res, context.method, ['DELETE']);
+    }
+
+    const body = getRequestBody(req);
+    const adminId = getString(body.adminId);
+
+    // Verify admin
+    if (adminId && !(await ensureAdmin(adminId))) {
+      return json(res, 403, { error: 'Only admins can clear attendance records' });
+    }
+
+    const result = await attendanceCollection.deleteMany({});
+
+    return json(res, 200, {
+      message: 'All attendance records cleared successfully',
+      deletedCount: result.deletedCount
+    });
+  }
+
   return false;
 };
 
