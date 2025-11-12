@@ -35,3 +35,10 @@ server/database.sqlite-journal
 
 # Vercel
 .vercel
+ENV_FILE_CONTENT.md
+VERCEL_ENV_SETUP.md
+.env
+.env.*
+*.pem
+*.key
+
