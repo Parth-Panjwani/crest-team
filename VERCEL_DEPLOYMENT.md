@@ -30,7 +30,8 @@ In Vercel dashboard → **Settings → General**:
 2. **Root Directory:** Leave empty (or `.` if needed)
 3. **Build Command:** `npm run build` (already in vercel.json)
 4. **Output Directory:** `dist` (already in vercel.json)
-5. **Install Command:** `npm install` (default)
+5. **Serverless Runtime:** leave as default; `vercel.json` pins `api/[...path].ts` to Node.js 20 for MongoDB/zlib support
+6. **Install Command:** `npm install` (default)
 
 ## Step 3: Build Configuration
 
@@ -129,6 +130,12 @@ After deployment:
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/[...path].ts": {
+      "runtime": "nodejs20.x",
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",

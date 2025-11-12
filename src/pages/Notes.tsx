@@ -99,19 +99,21 @@ export default function Notes() {
       case 'italic':
         newText = noteText.substring(0, start) + `*${selectedText || 'italic text'}*` + noteText.substring(end);
         break;
-      case 'bullet':
+      case 'bullet': {
         const lines = noteText.split('\n');
         const currentLine = noteText.substring(0, start).split('\n').length - 1;
         lines[currentLine] = lines[currentLine] ? `• ${lines[currentLine]}` : '• ';
         newText = lines.join('\n');
         break;
-      case 'number':
+      }
+      case 'number': {
         const numLines = noteText.split('\n');
         const numCurrentLine = noteText.substring(0, start).split('\n').length - 1;
         const lineNum = numCurrentLine + 1;
         numLines[numCurrentLine] = numLines[numCurrentLine] ? `${lineNum}. ${numLines[numCurrentLine]}` : `${lineNum}. `;
         newText = numLines.join('\n');
         break;
+      }
       default:
         return;
     }
