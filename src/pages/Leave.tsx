@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar as CalendarIcon, Plus, Check, X } from 'lucide-react';
 import { Layout } from '@/components/Layout';
@@ -18,17 +18,17 @@ export default function Leave() {
   });
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadLeaves();
-  }, [user]);
-
-  const loadLeaves = () => {
+  const loadLeaves = useCallback(() => {
     if (isAdmin) {
       setLeaves(store.getPendingLeaves());
     } else {
       setLeaves(store.getUserLeaves(user?.id || ''));
     }
-  };
+  }, [isAdmin, user?.id]);
+
+  useEffect(() => {
+    loadLeaves();
+  }, [loadLeaves]);
 
   const handleSubmit = () => {
     if (!formData.date || !formData.reason.trim()) {
