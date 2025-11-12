@@ -210,13 +210,23 @@ export default function Notes() {
     setShowPermanentDeleteDialog(true);
   };
 
-  const confirmPermanentDelete = () => {
+  const confirmPermanentDelete = async () => {
     if (noteToPermanentDelete) {
-      store.permanentDeleteNote(noteToPermanentDelete);
-      toast({ title: 'Note Permanently Deleted', description: 'Note has been permanently removed', variant: 'destructive' });
-      setNoteToPermanentDelete(null);
-      setShowPermanentDeleteDialog(false);
-      loadNotes();
+      try {
+        await store.permanentDeleteNote(noteToPermanentDelete);
+        toast({ title: 'Note Permanently Deleted', description: 'Note has been permanently removed', variant: 'destructive' });
+        setNoteToPermanentDelete(null);
+        setShowPermanentDeleteDialog(false);
+        // refreshData() is already called in permanentDeleteNote, which triggers notifyListeners()
+        // Force a reload to ensure the UI updates immediately
+        loadNotes();
+      } catch (error) {
+        toast({ 
+          title: 'Error', 
+          description: error instanceof Error ? error.message : 'Failed to permanently delete note', 
+          variant: 'destructive' 
+        });
+      }
     }
   };
 
