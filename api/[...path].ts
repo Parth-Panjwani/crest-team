@@ -23,12 +23,7 @@ import type {
   SalaryDocument,
   SalaryHistoryDocument,
   UserDocument,
-} from './mongodb.js';
-
-export const config = {
-  runtime: 'nodejs20.x',
-  maxDuration: 30,
-} as const;
+} from './mongodb';
 
 type ApiMethod = NonNullable<VercelRequest['method']>;
 
@@ -675,7 +670,7 @@ const handleSalaries: ApiHandler = async (req, res, context) => {
       return json(res, 400, { error: 'id is required to update salary' });
     }
     const updates: Partial<SalaryDocument> = {};
-    const updateKeys: Array<Extract<keyof SalaryDocument, string>> = [
+    const updateKeys: Array<keyof SalaryDocument> = [
       'userId',
       'month',
       'type',
