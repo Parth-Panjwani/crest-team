@@ -60,6 +60,22 @@ MongoDB connection is configured in `api/mongodb.ts`. For production, set `MONGO
 - ✅ Real-time data sync
 - ✅ Multi-user support
 
+## ⚙️ Backend & API Highlights
+
+- 🔐 **Single catch-all serverless handler** in [`api/[...path].ts`](api/%5B...path%5D.ts) routes every `/api/*` request, matches the local Express bridge, and centralizes typed validation for attendance, notes, salaries, leaves, and announcements.
+- 🗃️ **Typed MongoDB models** in [`api/mongodb.ts`](api/mongodb.ts) remove `any` usage, enforce schema-safe CRUD helpers, and transparently compress large note bodies while keeping legacy documents readable.
+- 🚀 **Bootstrap endpoint** (`/api/bootstrap`) batches the dashboard payload (users, attendance, notes, salaries, announcements, and more) so the client performs a single hydrated fetch on load.
+
+## 📈 Performance Improvements
+
+- 🪄 **Compressed note storage** dramatically reduces MongoDB document size and network transfer, with automatic backfill for legacy records.
+- 🧭 **Client-side data store** (`src/lib/store.ts`) keeps memoized maps, lazy background refreshes, and graceful error boundaries for a snappy UI.
+- 🧩 **Route-level code splitting** via `React.lazy` and manual Rollup chunking (see [`vite.config.ts`](vite.config.ts)) keeps the largest production bundle well under Vercel’s default 500&nbsp;kB budget.
+
+## 📚 Additional Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) – deep dive into the API router, MongoDB helpers, bootstrap flow, and data compression strategy.
+
 ## 🚢 Deployment
 
 ### Prerequisites

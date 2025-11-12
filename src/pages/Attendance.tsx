@@ -291,10 +291,11 @@ export default function Attendance() {
       setIsManualPunchDialogOpen(false);
       setSelectedEmployeeForPunch(null);
       setManualPunchReason('');
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to record manual punch';
       toast({
         title: 'Error',
-        description: error.message || 'Failed to record manual punch',
+        description: message,
         variant: 'destructive',
       });
     }

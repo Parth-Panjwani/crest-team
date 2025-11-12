@@ -1,8 +1,93 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { connectToDatabase, getCollection, formatUser, formatAttendance, formatNote, formatLeave, formatSalary } from './mongodb.js';
+import {
+  getCollection,
+  formatUser,
+  formatAttendance,
+  formatNote,
+  formatLeave,
+  formatSalary,
+  compressNoteText,
+  formatAnnouncement,
+} from './mongodb.js';
 import { v4 as uuidv4 } from 'uuid';
+import type { Filter } from 'mongodb';
+import type {
+  AnnouncementDocument,
+  AttendanceDocument,
+  AttendancePunch,
+  AttendancePunchType,
+  LeaveDocument,
+  NoteDocument,
+  PendingAdvanceDocument,
+  PendingStorePurchaseDocument,
+  SalaryDocument,
+  SalaryHistoryDocument,
+  UserDocument,
+} from './mongodb.js';
 
-function calculateTotals(punches: any[]) {
+type ApiMethod = NonNullable<VercelRequest['method']>;
+
+type ApiHandler = (
+  req: VercelRequest,
+  res: VercelResponse,
+  context: { segments: string[]; method: ApiMethod }
+) => Promise<boolean> | boolean;
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function getRequestBody(req: VercelRequest): UnknownRecord {
+  const rawBody: unknown = req.body;
+  return isRecord(rawBody) ? rawBody : {};
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function getBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function getNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function getPathSegments(req: VercelRequest): string[] {
+  if (Array.isArray(req.query.path)) {
+    return req.query.path.filter(Boolean);
+  }
+
+  if (typeof req.query.path === 'string') {
+    return req.query.path.split('/').filter(Boolean);
+  }
+
+  if (req.url) {
+    const url = new URL(req.url, 'https://placeholder.local');
+    return url.pathname
+      .replace(/^\/?api\/?/, '')
+      .split('/')
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function json(res: VercelResponse, status: number, payload: unknown): true {
+  res.status(status).json(payload);
+  return true;
+}
+
+function methodNotAllowed(res: VercelResponse, method: ApiMethod, allowed: ApiMethod[]): true {
+  res.setHeader('Allow', allowed.join(', '));
+  res.status(405).json({ error: `Method ${method} not allowed` });
+  return true;
+}
+
+function calculateTotals(punches: AttendancePunch[]): { workMin: number; breakMin: number } {
   let workMin = 0;
   let breakMin = 0;
   let lastIn: number | null = null;
@@ -11,19 +96,31 @@ function calculateTotals(punches: any[]) {
 
   for (const punch of punches) {
     const punchTime = new Date(punch.at).getTime();
-    if (punch.type === 'IN') {
-      lastIn = punchTime;
-    } else if (punch.type === 'OUT' && lastIn) {
-      workMin += (punchTime - lastIn) / 60000;
-      lastIn = null;
-    } else if (punch.type === 'BREAK_START' && lastIn) {
-      workMin += (punchTime - lastIn) / 60000;
-      lastBreakStart = punchTime;
-      lastIn = null;
-    } else if (punch.type === 'BREAK_END' && lastBreakStart) {
-      breakMin += (punchTime - lastBreakStart) / 60000;
-      lastIn = punchTime;
-      lastBreakStart = null;
+
+    switch (punch.type) {
+      case 'IN':
+        lastIn = punchTime;
+        break;
+      case 'OUT':
+        if (lastIn) {
+          workMin += (punchTime - lastIn) / 60000;
+          lastIn = null;
+        }
+        break;
+      case 'BREAK_START':
+        if (lastIn) {
+          workMin += (punchTime - lastIn) / 60000;
+          lastBreakStart = punchTime;
+          lastIn = null;
+        }
+        break;
+      case 'BREAK_END':
+        if (lastBreakStart) {
+          breakMin += (punchTime - lastBreakStart) / 60000;
+          lastIn = punchTime;
+          lastBreakStart = null;
+        }
+        break;
     }
   }
 
@@ -33,390 +130,843 @@ function calculateTotals(punches: any[]) {
 
   return {
     workMin: Math.round(workMin),
-    breakMin: Math.round(breakMin)
+    breakMin: Math.round(breakMin),
   };
 }
 
-async function isAdmin(userId: string): Promise<boolean> {
-  const usersCollection = await getCollection('users');
-  const user = await usersCollection.findOne({ id: userId }) as any;
+async function ensureAdmin(userId: string): Promise<boolean> {
+  const usersCollection = await getCollection<UserDocument>('users');
+  const user = await usersCollection.findOne({ id: userId });
   return user?.role === 'admin';
 }
 
+const handleHealth: ApiHandler = (_, res, context) => {
+  if (context.segments.length === 0) {
+    return json(res, 200, { status: 'ok', timestamp: new Date().toISOString() });
+  }
+
+  if (context.segments[0] === 'health' && context.method === 'GET') {
+    return json(res, 200, { status: 'ok', timestamp: new Date().toISOString() });
+  }
+
+  return false;
+};
+
+const handleAuth: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'auth' || context.segments[1] !== 'login') {
+    return false;
+  }
+
+  if (context.method !== 'POST') {
+    return methodNotAllowed(res, context.method, ['POST']);
+  }
+
+  const body = getRequestBody(req);
+  const pin = getString(body.pin);
+
+  if (!pin) {
+    return json(res, 400, { error: 'PIN is required' });
+  }
+
+  const usersCollection = await getCollection<UserDocument>('users');
+  const user = await usersCollection.findOne({ pin });
+
+  if (!user) {
+    return json(res, 401, { error: 'Invalid PIN' });
+  }
+
+  return json(res, 200, formatUser(user));
+};
+
+const handleUsers: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'users') {
+    return false;
+  }
+
+  const usersCollection = await getCollection<UserDocument>('users');
+  const id = context.segments[1];
+
+  if (!id) {
+    if (context.method === 'GET') {
+      const users = await usersCollection.find({}).toArray();
+      return json(res, 200, users.map(formatUser));
+    }
+
+    if (context.method === 'POST') {
+      const body = getRequestBody(req);
+      const name = getString(body.name);
+      const role = getString(body.role) as UserDocument['role'] | undefined;
+      const pin = getString(body.pin);
+      const baseSalary = getNumber(body.baseSalary);
+
+      if (!name || !role || !pin) {
+        return json(res, 400, { error: 'name, role and pin are required' });
+      }
+
+      const user: UserDocument = {
+        id: uuidv4(),
+        name,
+        role,
+        pin,
+        baseSalary: baseSalary ?? null,
+      };
+
+      await usersCollection.insertOne(user);
+      return json(res, 200, formatUser(user));
+    }
+
+    return methodNotAllowed(res, context.method, ['GET', 'POST']);
+  }
+
+  if (context.method === 'GET') {
+    const user = await usersCollection.findOne({ id });
+    if (!user) {
+      return json(res, 404, { error: 'User not found' });
+    }
+    return json(res, 200, formatUser(user));
+  }
+
+  if (context.method === 'PUT') {
+    const body = getRequestBody(req);
+    const name = getString(body.name);
+    const role = getString(body.role) as UserDocument['role'] | undefined;
+    const pin = getString(body.pin);
+    const baseSalary = getNumber(body.baseSalary);
+    const updates: Partial<UserDocument> = {};
+    if (name !== undefined) {
+      updates.name = name;
+    }
+    if (role !== undefined) {
+      updates.role = role;
+    }
+    if (pin !== undefined) {
+      updates.pin = pin;
+    }
+    if (baseSalary !== undefined) {
+      updates.baseSalary = baseSalary;
+    }
+    await usersCollection.updateOne({ id }, { $set: updates });
+    const user = await usersCollection.findOne({ id });
+    return json(res, 200, formatUser(user));
+  }
+
+  if (context.method === 'DELETE') {
+    await usersCollection.deleteOne({ id });
+    await (await getCollection<AttendanceDocument>('attendance')).deleteMany({ userId: id });
+    await (await getCollection<NoteDocument>('notes')).deleteMany({ createdBy: id });
+    await (await getCollection<LeaveDocument>('leaves')).deleteMany({ userId: id });
+    await (await getCollection<SalaryDocument>('salaries')).deleteMany({ userId: id });
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'PUT', 'DELETE']);
+};
+
+const handleAttendance: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'attendance') {
+    return false;
+  }
+
+  const attendanceCollection = await getCollection<AttendanceDocument>('attendance');
+  const action = context.segments[1];
+
+  if (action === 'punch') {
+    if (context.method !== 'POST') {
+      return methodNotAllowed(res, context.method, ['POST']);
+    }
+
+    const body = getRequestBody(req);
+    const userId = getString(body.userId);
+    const type = getString(body.type) as AttendancePunchType | undefined;
+    const manualPunch = getBoolean(body.manualPunch) ?? false;
+    const punchedBy = getString(body.punchedBy);
+    const reason = getString(body.reason);
+    const customTime = getString(body.customTime);
+
+    if (!userId || !type) {
+      return json(res, 400, { error: 'userId and type are required' });
+    }
+
+    if (manualPunch && punchedBy && !(await ensureAdmin(punchedBy))) {
+      return json(res, 403, { error: 'Only admins can perform manual punches' });
+    }
+
+    const punchDate = customTime
+      ? new Date(customTime).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0];
+    const punchTime = customTime ? new Date(customTime) : new Date();
+
+    let attendance = await attendanceCollection.findOne({ userId, date: punchDate });
+
+    if (!attendance) {
+      attendance = {
+        id: uuidv4(),
+        userId,
+        date: punchDate,
+        punches: [],
+        totals: { workMin: 0, breakMin: 0 },
+      };
+      await attendanceCollection.insertOne(attendance);
+    }
+
+    const current = formatAttendance(attendance);
+    const punches = [...current.punches];
+
+    const newPunch: AttendancePunch = {
+      at: punchTime.toISOString(),
+      type,
+    };
+
+    if (manualPunch) {
+      newPunch.manualPunch = true;
+      if (punchedBy) {
+        newPunch.punchedBy = punchedBy;
+      }
+      if (reason) {
+        newPunch.reason = reason;
+      }
+    }
+
+    punches.push(newPunch);
+    const totals = calculateTotals(punches);
+
+    await attendanceCollection.updateOne({ id: attendance.id }, { $set: { punches, totals } });
+    const updated = await attendanceCollection.findOne({ id: attendance.id });
+    return json(res, 200, formatAttendance(updated));
+  }
+
+  if (action === 'today' && context.segments[2]) {
+    if (context.method !== 'GET') {
+      return methodNotAllowed(res, context.method, ['GET']);
+    }
+
+    const userId = context.segments[2];
+    const today = new Date().toISOString().split('T')[0];
+    const attendance = await attendanceCollection.findOne({ userId, date: today });
+    return json(res, 200, attendance ? formatAttendance(attendance) : null);
+  }
+
+  if (action === 'history' && context.segments[2]) {
+    if (context.method !== 'GET') {
+      return methodNotAllowed(res, context.method, ['GET']);
+    }
+
+    const userId = context.segments[2];
+    const limitParam = req.query.limit;
+    const limit = typeof limitParam === 'string' ? parseInt(limitParam, 10) : 30;
+    const attendances = await attendanceCollection
+      .find({ userId })
+      .sort({ date: -1 })
+      .limit(Number.isNaN(limit) ? 30 : limit)
+      .toArray();
+    return json(res, 200, attendances.map(formatAttendance));
+  }
+
+  if (action === 'all') {
+    if (context.method !== 'GET') {
+      return methodNotAllowed(res, context.method, ['GET']);
+    }
+
+    const attendances = await attendanceCollection.find({}).sort({ date: -1 }).toArray();
+    return json(res, 200, attendances.map(formatAttendance));
+  }
+
+  return false;
+};
+
+const handleNotes: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'notes') {
+    return false;
+  }
+
+  const notesCollection = await getCollection<NoteDocument>('notes');
+  const id = context.segments[1];
+
+  if (!id) {
+    if (context.method === 'GET') {
+      const deleted = req.query.deleted;
+      const userId = req.query.userId;
+      const includeDeleted = deleted === 'true';
+      const query: Filter<NoteDocument> = includeDeleted ? { deleted: true } : { deleted: { $ne: true } };
+      if (includeDeleted && typeof userId === 'string') {
+        query.deletedBy = userId;
+      }
+      const notes = await notesCollection.find(query).sort({ createdAt: -1 }).toArray();
+      return json(res, 200, notes.map(formatNote));
+    }
+
+    if (context.method === 'POST') {
+      const body = getRequestBody(req);
+      const text = getString(body.text);
+      const createdBy = getString(body.createdBy);
+      const category = getString(body.category);
+      const adminOnly = getBoolean(body.adminOnly) ?? false;
+
+      if (!text || !createdBy) {
+        return json(res, 400, { error: 'text and createdBy are required' });
+      }
+
+      const { textCompressed, textLength, textHash } = compressNoteText(text);
+      const now = new Date().toISOString();
+      const note: NoteDocument = {
+        id: uuidv4(),
+        textCompressed,
+        textLength,
+        textHash,
+        createdBy,
+        createdAt: now,
+        status: 'pending',
+        category: category || 'general',
+        adminOnly,
+      };
+
+      await notesCollection.insertOne(note);
+      const inserted = await notesCollection.findOne({ id: note.id });
+      return json(res, 200, formatNote(inserted ?? note));
+    }
+
+    return methodNotAllowed(res, context.method, ['GET', 'POST']);
+  }
+
+  if (context.method === 'PUT') {
+    const body = getRequestBody(req);
+    const text = getString(body.text);
+    const status = getString(body.status);
+    const category = getString(body.category);
+    const adminOnly = getBoolean(body.adminOnly);
+    const update: Partial<NoteDocument> = {};
+
+    if (status !== undefined) {
+      update.status = status;
+    }
+    if (category !== undefined) {
+      update.category = category;
+    }
+    if (adminOnly !== undefined) {
+      update.adminOnly = adminOnly;
+    }
+
+    if (text !== undefined) {
+      const { textCompressed, textLength, textHash } = compressNoteText(text);
+      update.textCompressed = textCompressed;
+      update.textLength = textLength;
+      update.textHash = textHash;
+      update.updatedAt = new Date().toISOString();
+    }
+
+    await notesCollection.updateOne(
+      { id },
+      { $set: update, $unset: { text: '' } }
+    );
+    const note = await notesCollection.findOne({ id });
+    return json(res, 200, formatNote(note));
+  }
+
+  if (context.method === 'DELETE') {
+    const body = getRequestBody(req);
+    const deletedBy = getString(body.deletedBy);
+
+    if (deletedBy) {
+      await notesCollection.updateOne(
+        { id },
+        { $set: { deleted: true, deletedAt: new Date().toISOString(), deletedBy } }
+      );
+    } else {
+      await notesCollection.deleteOne({ id });
+    }
+
+    return json(res, 200, { success: true });
+  }
+
+  if (context.method === 'POST' && context.segments[2] === 'restore') {
+    await notesCollection.updateOne(
+      { id },
+      { $set: { deleted: false, deletedAt: null, deletedBy: null } }
+    );
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['DELETE', 'PUT', 'POST']);
+};
+
+const handleBootstrap: ApiHandler = async (_req, res, context) => {
+  if (context.segments[0] !== 'bootstrap') {
+    return false;
+  }
+
+  if (context.method !== 'GET') {
+    return methodNotAllowed(res, context.method, ['GET']);
+  }
+
+  const [
+    usersCollection,
+    notesCollection,
+    leavesCollection,
+    salariesCollection,
+    attendanceCollection,
+    salaryHistoryCollection,
+    pendingAdvancesCollection,
+    pendingStorePurchasesCollection,
+    announcementsCollection,
+  ] = await Promise.all([
+    getCollection<UserDocument>('users'),
+    getCollection<NoteDocument>('notes'),
+    getCollection<LeaveDocument>('leaves'),
+    getCollection<SalaryDocument>('salaries'),
+    getCollection<AttendanceDocument>('attendance'),
+    getCollection<SalaryHistoryDocument>('salaryHistory'),
+    getCollection<PendingAdvanceDocument>('pendingAdvances'),
+    getCollection<PendingStorePurchaseDocument>('pendingStorePurchases'),
+    getCollection<AnnouncementDocument>('announcements'),
+  ]);
+
+  const [users, notes, leaves, salaries, attendance, salaryHistory, pendingAdvances, pendingStorePurchases, announcements] =
+    await Promise.all([
+      usersCollection.find({}).project({ _id: 0 }).toArray(),
+      notesCollection
+        .find({}, { sort: { createdAt: -1 } })
+        .project({ _id: 0 })
+        .toArray(),
+      leavesCollection.find({}).project({ _id: 0 }).toArray(),
+      salariesCollection.find({}).project({ _id: 0 }).toArray(),
+      attendanceCollection.find({}).project({ _id: 0 }).toArray(),
+      salaryHistoryCollection.find({}).project({ _id: 0 }).toArray(),
+      pendingAdvancesCollection.find({}).project({ _id: 0 }).toArray(),
+      pendingStorePurchasesCollection.find({}).project({ _id: 0 }).toArray(),
+      announcementsCollection.find({}, { sort: { createdAt: -1 } }).project({ _id: 0 }).toArray(),
+    ]);
+
+  return json(res, 200, {
+    users: users.map(formatUser),
+    notes: notes.map(formatNote),
+    leaves: leaves.map(formatLeave),
+    salaries: salaries.map(formatSalary),
+    attendance: attendance.map(formatAttendance),
+    salaryHistory,
+    pendingAdvances,
+    pendingStorePurchases,
+    announcements: announcements.map(formatAnnouncement),
+  });
+};
+
+const handleLeaves: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'leaves') {
+    return false;
+  }
+
+  const leavesCollection = await getCollection<LeaveDocument>('leaves');
+  const id = context.segments[1];
+
+  if (!id) {
+    if (context.method === 'GET') {
+      const userId = req.query.userId;
+      const query: Filter<LeaveDocument> = typeof userId === 'string' ? { userId } : {};
+      const leaves = await leavesCollection.find(query).sort({ date: -1 }).toArray();
+      return json(res, 200, leaves.map(formatLeave));
+    }
+
+    if (context.method === 'POST') {
+      const body = getRequestBody(req);
+      const userId = getString(body.userId);
+      const date = getString(body.date);
+      const type = getString(body.type);
+      const reason = getString(body.reason);
+
+      if (!userId || !date || !type) {
+        return json(res, 400, { error: 'userId, date and type are required' });
+      }
+
+      const leave: LeaveDocument = {
+        id: uuidv4(),
+        userId,
+        date,
+        type,
+        reason,
+        status: 'pending',
+      };
+
+      await leavesCollection.insertOne(leave);
+      return json(res, 200, formatLeave(leave));
+    }
+
+    return methodNotAllowed(res, context.method, ['GET', 'POST']);
+  }
+
+  if (context.method === 'PUT') {
+    const body = getRequestBody(req);
+    const status = getString(body.status);
+    if (status !== undefined) {
+      await leavesCollection.updateOne({ id }, { $set: { status } });
+    }
+    const leave = await leavesCollection.findOne({ id });
+    return json(res, 200, formatLeave(leave));
+  }
+
+  if (context.method === 'DELETE') {
+    await leavesCollection.deleteOne({ id });
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['PUT', 'DELETE']);
+};
+
+const handleSalaries: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'salaries') {
+    return false;
+  }
+
+  const salariesCollection = await getCollection<SalaryDocument>('salaries');
+  const id = context.segments[1];
+
+  if (id && context.method === 'DELETE') {
+    await salariesCollection.deleteOne({ id });
+    return json(res, 200, { success: true });
+  }
+
+  if (context.method === 'GET') {
+    const userId = req.query.userId;
+    const month = req.query.month;
+    const query: Filter<SalaryDocument> = {};
+    if (typeof userId === 'string') {
+      query.userId = userId;
+    }
+    if (typeof month === 'string') {
+      query.month = month;
+    }
+    const salaries = await salariesCollection.find(query).sort({ month: -1 }).toArray();
+    return json(res, 200, salaries.map(formatSalary));
+  }
+
+  if (context.method === 'POST') {
+    const body = getRequestBody(req);
+    const newSalary: SalaryDocument = {
+      id: uuidv4(),
+      userId: getString(body.userId) ?? '',
+      month: getString(body.month) ?? '',
+      type: getString(body.type),
+      base: getNumber(body.base),
+      hours: getNumber(body.hours),
+      calcPay: getNumber(body.calcPay),
+      adjustments: getNumber(body.adjustments),
+      advances: Array.isArray(body.advances) ? body.advances : undefined,
+      storePurchases: Array.isArray(body.storePurchases) ? body.storePurchases : undefined,
+      totalDeductions: getNumber(body.totalDeductions),
+      finalPay: getNumber(body.finalPay),
+      paid: typeof body.paid === 'boolean' || typeof body.paid === 'number' ? (body.paid as number | boolean) : undefined,
+      paidDate: getString(body.paidDate),
+      note: getString(body.note),
+    };
+    if (!newSalary.userId || !newSalary.month) {
+      return json(res, 400, { error: 'userId and month are required to create salary records' });
+    }
+    await salariesCollection.insertOne(newSalary);
+    return json(res, 200, formatSalary(newSalary));
+  }
+
+  if (context.method === 'PUT') {
+    const body = getRequestBody(req);
+    const salaryId = getString(body.id);
+    if (!salaryId) {
+      return json(res, 400, { error: 'id is required to update salary' });
+    }
+    const updates: Partial<SalaryDocument> = {};
+    const updateKeys: Array<Extract<keyof SalaryDocument, string>> = [
+      'userId',
+      'month',
+      'type',
+      'base',
+      'hours',
+      'calcPay',
+      'adjustments',
+      'advances',
+      'storePurchases',
+      'totalDeductions',
+      'finalPay',
+      'paid',
+      'paidDate',
+      'note',
+    ];
+    for (const key of updateKeys) {
+      const value = (body as UnknownRecord)[key];
+      if (value !== undefined) {
+        (updates as UnknownRecord)[key] = value;
+      }
+    }
+    await salariesCollection.updateOne({ id: salaryId }, { $set: updates });
+    const updated = await salariesCollection.findOne({ id: salaryId });
+    return json(res, 200, formatSalary(updated));
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'POST', 'PUT', 'DELETE']);
+};
+
+const handleSalaryHistory: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'salaryHistory') {
+    return false;
+  }
+
+  const salaryHistoryCollection = await getCollection<SalaryHistoryDocument>('salaryHistory');
+
+  if (context.method === 'GET') {
+    const userId = req.query.userId;
+    const query: Filter<SalaryHistoryDocument> = typeof userId === 'string' ? { userId } : {};
+    const history = await salaryHistoryCollection.find(query).sort({ date: -1 }).toArray();
+    return json(res, 200, history);
+  }
+
+  if (context.method === 'POST') {
+    const body = getRequestBody(req);
+    const entry: SalaryHistoryDocument = {
+      id: uuidv4(),
+      userId: getString(body.userId) ?? '',
+      date: getString(body.date) ?? new Date().toISOString(),
+      oldBaseSalary: typeof body.oldBaseSalary === 'number' ? body.oldBaseSalary : null,
+      newBaseSalary: getNumber(body.newBaseSalary) ?? 0,
+      changedBy: getString(body.changedBy) ?? '',
+      reason: getString(body.reason),
+    };
+    await salaryHistoryCollection.insertOne(entry);
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'POST']);
+};
+
+const handlePendingAdvances: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'pendingAdvances') {
+    return false;
+  }
+
+  const pendingAdvancesCollection = await getCollection<PendingAdvanceDocument>('pendingAdvances');
+  const id = context.segments[1];
+
+  if (context.method === 'GET') {
+    const userId = req.query.userId;
+    const query: Filter<PendingAdvanceDocument> = { deducted: { $ne: true } };
+    if (typeof userId === 'string') {
+      query.userId = userId;
+    }
+    const advances = await pendingAdvancesCollection.find(query).sort({ date: -1 }).toArray();
+    return json(res, 200, advances);
+  }
+
+  if (context.method === 'POST') {
+    const body = getRequestBody(req);
+    const newAdvance: PendingAdvanceDocument = {
+      id: uuidv4(),
+      userId: getString(body.userId) ?? '',
+      date: getString(body.date) ?? new Date().toISOString(),
+      amount: getNumber(body.amount) ?? 0,
+      description: getString(body.description),
+      deducted: false,
+      createdAt: getString(body.createdAt) ?? new Date().toISOString(),
+      deductedInSalaryId: getString(body.deductedInSalaryId),
+    };
+    if (!newAdvance.userId) {
+      return json(res, 400, { error: 'userId is required to create a pending advance' });
+    }
+    await pendingAdvancesCollection.insertOne(newAdvance);
+    return json(res, 200, newAdvance);
+  }
+
+  if (context.method === 'PUT' && id) {
+    await pendingAdvancesCollection.updateOne({ id }, { $set: { deducted: true } });
+    return json(res, 200, { success: true });
+  }
+
+  if (context.method === 'DELETE' && id) {
+    await pendingAdvancesCollection.deleteOne({ id });
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'POST', 'PUT', 'DELETE']);
+};
+
+const handlePendingStorePurchases: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'pendingStorePurchases') {
+    return false;
+  }
+
+  const pendingStorePurchasesCollection = await getCollection<PendingStorePurchaseDocument>('pendingStorePurchases');
+  const id = context.segments[1];
+
+  if (context.method === 'GET') {
+    const userId = req.query.userId;
+    const query: Filter<PendingStorePurchaseDocument> = { deducted: { $ne: true } };
+    if (typeof userId === 'string') {
+      query.userId = userId;
+    }
+    const purchases = await pendingStorePurchasesCollection.find(query).sort({ date: -1 }).toArray();
+    return json(res, 200, purchases);
+  }
+
+  if (context.method === 'POST') {
+    const body = getRequestBody(req);
+    const newPurchase: PendingStorePurchaseDocument = {
+      id: uuidv4(),
+      userId: getString(body.userId) ?? '',
+      date: getString(body.date) ?? new Date().toISOString(),
+      amount: getNumber(body.amount) ?? 0,
+      description: getString(body.description),
+      deducted: false,
+      createdAt: getString(body.createdAt) ?? new Date().toISOString(),
+      deductedInSalaryId: getString(body.deductedInSalaryId),
+    };
+    if (!newPurchase.userId) {
+      return json(res, 400, { error: 'userId is required to create a pending purchase' });
+    }
+    await pendingStorePurchasesCollection.insertOne(newPurchase);
+    return json(res, 200, newPurchase);
+  }
+
+  if (context.method === 'PUT' && id) {
+    await pendingStorePurchasesCollection.updateOne({ id }, { $set: { deducted: true } });
+    return json(res, 200, { success: true });
+  }
+
+  if (context.method === 'DELETE' && id) {
+    await pendingStorePurchasesCollection.deleteOne({ id });
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'POST', 'PUT', 'DELETE']);
+};
+
+const handleAnnouncements: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'announcements') {
+    return false;
+  }
+
+  const announcementsCollection = await getCollection<AnnouncementDocument>('announcements');
+  const id = context.segments[1];
+
+  if (id && context.segments[2] === 'read') {
+    if (context.method !== 'PUT') {
+      return methodNotAllowed(res, context.method, ['PUT']);
+    }
+
+    const body = getRequestBody(req);
+    const userId = getString(body.userId);
+
+    if (!userId) {
+      return json(res, 400, { error: 'userId is required' });
+    }
+
+    const announcement = await announcementsCollection.findOne({ id });
+    if (!announcement) {
+      return json(res, 404, { error: 'Not found' });
+    }
+
+    const readBy = Array.isArray(announcement.readBy) ? [...announcement.readBy] : [];
+
+    if (!readBy.includes(userId)) {
+      readBy.push(userId);
+      await announcementsCollection.updateOne({ id }, { $set: { readBy } });
+    }
+
+    return json(res, 200, { success: true });
+  }
+
+  if (!id) {
+    if (context.method === 'GET') {
+      const announcements = await announcementsCollection.find({}).sort({ createdAt: -1 }).toArray();
+      const response = announcements.map(announcement => {
+        const formatted = formatAnnouncement(announcement);
+        return {
+          ...formatted,
+          createdAt: new Date(formatted.createdAt),
+          expiresAt: formatted.expiresAt ? new Date(formatted.expiresAt) : null,
+        };
+      });
+      return json(
+        res,
+        200,
+        response
+      );
+    }
+
+    if (context.method === 'POST') {
+      const body = getRequestBody(req);
+      const title = getString(body.title);
+      const content = getString(body.body);
+      const expiresAt = getString(body.expiresAt);
+
+      if (!title || !content) {
+        return json(res, 400, { error: 'title and body are required' });
+      }
+
+      const announcement: AnnouncementDocument = {
+        id: uuidv4(),
+        title,
+        body: content,
+        createdAt: new Date().toISOString(),
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+        readBy: [] as string[],
+      };
+
+      await announcementsCollection.insertOne(announcement);
+
+      return json(res, 200, {
+        id: announcement.id,
+        title: announcement.title,
+        body: announcement.body ?? '',
+        createdAt: new Date(announcement.createdAt),
+        expiresAt: announcement.expiresAt ? new Date(announcement.expiresAt) : null,
+      });
+    }
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'POST', 'PUT']);
+};
+
+const routeHandlers: ApiHandler[] = [
+  handleAuth,
+  handleUsers,
+  handleAttendance,
+  handleNotes,
+  handleBootstrap,
+  handleLeaves,
+  handleSalaries,
+  handleSalaryHistory,
+  handlePendingAdvances,
+  handlePendingStorePurchases,
+  handleAnnouncements,
+];
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
-  // Extract path segments from Vercel's catch-all route
-  // With [...path], Vercel passes segments as req.query.path (array)
-  const pathParam = req.query.path;
-  let segments: string[] = [];
-  
-  if (Array.isArray(pathParam)) {
-    segments = pathParam.filter(Boolean);
-  } else if (typeof pathParam === 'string') {
-    segments = pathParam.split('/').filter(Boolean);
-  }
+  const method = (req.method || 'GET') as ApiMethod;
+  const segments = getPathSegments(req);
+  const context = { segments, method } as const;
 
-  // Fallback: extract from URL if query param is missing
-  if (segments.length === 0 && req.url) {
-    const urlPath = req.url.split('?')[0].split('#')[0];
-    if (urlPath.startsWith('/api/')) {
-      segments = urlPath.substring(5).split('/').filter(Boolean);
-    }
+  if (handleHealth(req, res, context)) {
+    return;
   }
 
   try {
-    // Health check endpoint
-    if (segments.length === 0 || (segments[0] === 'health' && req.method === 'GET')) {
-      return res.json({ status: 'ok', timestamp: new Date().toISOString() });
-    }
-
-    await connectToDatabase();
-
-    // Auth: POST /api/auth/login
-    if (segments[0] === 'auth' && segments[1] === 'login' && req.method === 'POST') {
-      const { pin } = req.body;
-      const usersCollection = await getCollection('users');
-      const user = await usersCollection.findOne({ pin }) as any;
-      if (!user) {
-        return res.status(401).json({ error: 'Invalid PIN' });
-      }
-      return res.json(formatUser(user));
-    }
-
-    // Users: GET /api/users, POST /api/users, GET /api/users/:id, PUT /api/users/:id, DELETE /api/users/:id
-    if (segments[0] === 'users') {
-      const usersCollection = await getCollection('users');
-      if (segments[1]) {
-        const id = segments[1];
-        if (req.method === 'GET') {
-          const user = await usersCollection.findOne({ id }) as any;
-          if (!user) return res.status(404).json({ error: 'User not found' });
-          return res.json(formatUser(user));
-        }
-        if (req.method === 'PUT') {
-          const { name, role, pin, baseSalary } = req.body;
-          await usersCollection.updateOne({ id }, { $set: { name, role, pin, baseSalary: baseSalary || null } });
-          const user = await usersCollection.findOne({ id }) as any;
-          return res.json(formatUser(user));
-        }
-        if (req.method === 'DELETE') {
-          await usersCollection.deleteOne({ id });
-          await getCollection('attendance').then(c => c.deleteMany({ userId: id }));
-          await getCollection('notes').then(c => c.deleteMany({ createdBy: id }));
-          await getCollection('leaves').then(c => c.deleteMany({ userId: id }));
-          await getCollection('salaries').then(c => c.deleteMany({ userId: id }));
-          return res.json({ success: true });
-        }
-      } else {
-        if (req.method === 'GET') {
-          const users = await usersCollection.find({}).toArray() as any[];
-          return res.json(users.map(formatUser));
-        }
-        if (req.method === 'POST') {
-          const { name, role, pin, baseSalary } = req.body;
-          const id = uuidv4();
-          const user = { id, name, role, pin, baseSalary: baseSalary || null };
-          await usersCollection.insertOne(user);
-          return res.json(formatUser(user));
-        }
+    for (const routeHandler of routeHandlers) {
+      const handled = await routeHandler(req, res, context);
+      if (handled) {
+        return;
       }
     }
 
-    // Attendance: POST /api/attendance/punch, GET /api/attendance/today/:userId, GET /api/attendance/history/:userId, GET /api/attendance/all
-    if (segments[0] === 'attendance') {
-      const attendanceCollection = await getCollection('attendance');
-      if (segments[1] === 'punch' && req.method === 'POST') {
-        const { userId, type, manualPunch, punchedBy, reason, customTime } = req.body;
-        const punchDate = customTime ? new Date(customTime).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-        const punchTime = customTime ? new Date(customTime) : new Date();
-        
-        if (manualPunch) {
-          const usersCollection = await getCollection('users');
-          const adminUser = await usersCollection.findOne({ id: punchedBy, role: 'admin' }) as any;
-          if (!adminUser) {
-            return res.status(403).json({ error: 'Only admins can perform manual punches' });
-          }
-        }
-        
-        let attendance = await attendanceCollection.findOne({ userId, date: punchDate }) as any;
-        if (!attendance) {
-          const id = uuidv4();
-          attendance = { id, userId, date: punchDate, punches: [], totals: { workMin: 0, breakMin: 0 } };
-          await attendanceCollection.insertOne(attendance);
-        }
-        
-        const punches = (attendance.punches || []) as any[];
-        const newPunch: any = { at: punchTime.toISOString(), type };
-        if (manualPunch) {
-          newPunch.manualPunch = true;
-          newPunch.punchedBy = punchedBy;
-          if (reason) newPunch.reason = reason;
-        }
-        punches.push(newPunch);
-        const totals = calculateTotals(punches);
-        
-        await attendanceCollection.updateOne({ id: attendance.id }, { $set: { punches, totals } });
-        const updated = await attendanceCollection.findOne({ id: attendance.id }) as any;
-        return res.json(formatAttendance(updated));
-      }
-
-      if (segments[1] === 'today' && segments[2] && req.method === 'GET') {
-        const userId = segments[2];
-        const today = new Date().toISOString().split('T')[0];
-        const attendance = await attendanceCollection.findOne({ userId, date: today }) as any;
-        return res.json(attendance ? formatAttendance(attendance) : null);
-      }
-
-      if (segments[1] === 'history' && segments[2] && req.method === 'GET') {
-        const userId = segments[2];
-        const limit = parseInt(req.query.limit as string) || 30;
-        const attendances = await attendanceCollection.find({ userId }).sort({ date: -1 }).limit(limit).toArray() as any[];
-        return res.json(attendances.map(formatAttendance));
-      }
-
-      if (segments[1] === 'all' && req.method === 'GET') {
-        const attendances = await attendanceCollection.find({}).sort({ date: -1 }).toArray() as any[];
-        return res.json(attendances.map(formatAttendance));
-      }
-    }
-
-    // Notes: GET /api/notes, POST /api/notes, PUT /api/notes/:id, DELETE /api/notes/:id, POST /api/notes/:id/restore
-    if (segments[0] === 'notes') {
-      const notesCollection = await getCollection('notes');
-      if (segments[1]) {
-        const id = segments[1];
-        if (req.method === 'PUT') {
-          const { text, status, category, adminOnly } = req.body;
-          await notesCollection.updateOne({ id }, { $set: { text, status, category, adminOnly } });
-          const note = await notesCollection.findOne({ id }) as any;
-          return res.json(formatNote(note));
-        }
-        if (req.method === 'DELETE') {
-          const { deletedBy } = req.body;
-          if (deletedBy) {
-            await notesCollection.updateOne({ id }, { $set: { deleted: true, deletedAt: new Date().toISOString(), deletedBy } });
-          } else {
-            await notesCollection.deleteOne({ id });
-          }
-          return res.json({ success: true });
-        }
-        if (req.method === 'POST' && segments[2] === 'restore') {
-          await notesCollection.updateOne({ id }, { $set: { deleted: false, deletedAt: null, deletedBy: null } });
-          return res.json({ success: true });
-        }
-      } else {
-        if (req.method === 'GET') {
-          const { deleted, userId } = req.query;
-          const query: any = deleted === 'true' ? { deleted: true } : { deleted: { $ne: true } };
-          if (deleted === 'true' && userId) query.deletedBy = userId;
-          const notes = await notesCollection.find(query).sort({ createdAt: -1 }).toArray() as any[];
-          return res.json(notes.map(formatNote));
-        }
-        if (req.method === 'POST') {
-          const { text, createdBy, category, adminOnly } = req.body;
-          const id = uuidv4();
-          const note = { id, text, createdBy, createdAt: new Date().toISOString(), status: 'pending', category: category || 'general', adminOnly: adminOnly || false };
-          await notesCollection.insertOne(note);
-          return res.json(formatNote(note));
-        }
-      }
-    }
-
-    // Leaves: GET /api/leaves, POST /api/leaves, PUT /api/leaves/:id, DELETE /api/leaves/:id
-    if (segments[0] === 'leaves') {
-      const leavesCollection = await getCollection('leaves');
-      if (segments[1]) {
-        const id = segments[1];
-        if (req.method === 'PUT') {
-          const { status } = req.body;
-          await leavesCollection.updateOne({ id }, { $set: { status } });
-          const leave = await leavesCollection.findOne({ id }) as any;
-          return res.json(formatLeave(leave));
-        }
-        if (req.method === 'DELETE') {
-          await leavesCollection.deleteOne({ id });
-          return res.json({ success: true });
-        }
-      } else {
-        if (req.method === 'GET') {
-          const { userId } = req.query;
-          const query: any = userId ? { userId } : {};
-          const leaves = await leavesCollection.find(query).sort({ date: -1 }).toArray() as any[];
-          return res.json(leaves.map(formatLeave));
-        }
-        if (req.method === 'POST') {
-          const { userId, date, type, reason } = req.body;
-          const id = uuidv4();
-          const leave = { id, userId, date, type, reason, status: 'pending' };
-          await leavesCollection.insertOne(leave);
-          return res.json(formatLeave(leave));
-        }
-      }
-    }
-
-    // Salaries: GET /api/salaries, POST /api/salaries, PUT /api/salaries, DELETE /api/salaries/:id
-    if (segments[0] === 'salaries') {
-      const salariesCollection = await getCollection('salaries');
-      if (segments[1] && req.method === 'DELETE') {
-        await salariesCollection.deleteOne({ id: segments[1] });
-        return res.json({ success: true });
-      } else {
-        if (req.method === 'GET') {
-          const { userId, month } = req.query;
-          const query: any = {};
-          if (userId) query.userId = userId;
-          if (month) query.month = month;
-          const salaries = await salariesCollection.find(query).sort({ month: -1 }).toArray() as any[];
-          return res.json(salaries.map(formatSalary));
-        }
-        if (req.method === 'POST') {
-          const salary = req.body;
-          const id = uuidv4();
-          await salariesCollection.insertOne({ ...salary, id });
-          return res.json(formatSalary({ ...salary, id }));
-        }
-        if (req.method === 'PUT') {
-          const { id, ...updates } = req.body;
-          await salariesCollection.updateOne({ id }, { $set: updates });
-          const updated = await salariesCollection.findOne({ id }) as any;
-          return res.json(formatSalary(updated));
-        }
-      }
-    }
-
-    // Salary History: GET /api/salaryHistory, POST /api/salaryHistory
-    if (segments[0] === 'salaryHistory') {
-      const salaryHistoryCollection = await getCollection('salaryHistory');
-      if (req.method === 'GET') {
-        const { userId } = req.query;
-        const query: any = userId ? { userId } : {};
-        const history = await salaryHistoryCollection.find(query).sort({ date: -1 }).toArray() as any[];
-        return res.json(history);
-      }
-      if (req.method === 'POST') {
-        const entry = req.body;
-        const id = uuidv4();
-        await salaryHistoryCollection.insertOne({ ...entry, id });
-        return res.json({ success: true });
-      }
-    }
-
-    // Pending Advances: GET /api/pendingAdvances, POST /api/pendingAdvances, PUT /api/pendingAdvances/:id, DELETE /api/pendingAdvances/:id
-    if (segments[0] === 'pendingAdvances') {
-      const pendingAdvancesCollection = await getCollection('pendingAdvances');
-      if (req.method === 'GET') {
-        const { userId } = req.query;
-        const query: any = { deducted: { $ne: true } };
-        if (userId) query.userId = userId;
-        const advances = await pendingAdvancesCollection.find(query).sort({ date: -1 }).toArray() as any[];
-        return res.json(advances);
-      }
-      if (req.method === 'POST') {
-        const advance = req.body;
-        const id = uuidv4();
-        await pendingAdvancesCollection.insertOne({ ...advance, id, deducted: false });
-        return res.json({ ...advance, id, deducted: false });
-      }
-      if (req.method === 'PUT' && segments[1]) {
-        await pendingAdvancesCollection.updateOne({ id: segments[1] }, { $set: { deducted: true } });
-        return res.json({ success: true });
-      }
-      if (req.method === 'DELETE' && segments[1]) {
-        await pendingAdvancesCollection.deleteOne({ id: segments[1] });
-        return res.json({ success: true });
-      }
-    }
-
-    // Pending Store Purchases: GET /api/pendingStorePurchases, POST /api/pendingStorePurchases, PUT /api/pendingStorePurchases/:id, DELETE /api/pendingStorePurchases/:id
-    if (segments[0] === 'pendingStorePurchases') {
-      const pendingStorePurchasesCollection = await getCollection('pendingStorePurchases');
-      if (req.method === 'GET') {
-        const { userId } = req.query;
-        const query: any = { deducted: { $ne: true } };
-        if (userId) query.userId = userId;
-        const purchases = await pendingStorePurchasesCollection.find(query).sort({ date: -1 }).toArray() as any[];
-        return res.json(purchases);
-      }
-      if (req.method === 'POST') {
-        const purchase = req.body;
-        const id = uuidv4();
-        await pendingStorePurchasesCollection.insertOne({ ...purchase, id, deducted: false });
-        return res.json({ ...purchase, id, deducted: false });
-      }
-      if (req.method === 'PUT' && segments[1]) {
-        await pendingStorePurchasesCollection.updateOne({ id: segments[1] }, { $set: { deducted: true } });
-        return res.json({ success: true });
-      }
-      if (req.method === 'DELETE' && segments[1]) {
-        await pendingStorePurchasesCollection.deleteOne({ id: segments[1] });
-        return res.json({ success: true });
-      }
-    }
-
-    // Announcements: GET /api/announcements, POST /api/announcements, PUT /api/announcements/:id/read
-    if (segments[0] === 'announcements') {
-      const announcementsCollection = await getCollection('announcements');
-      if (segments[1] && segments[2] === 'read' && req.method === 'PUT') {
-        const id = segments[1];
-        const { userId } = req.body;
-        const announcement = await announcementsCollection.findOne({ id }) as any;
-        if (!announcement) return res.status(404).json({ error: 'Not found' });
-        const readBy = (announcement.readBy || []) as string[];
-        if (!readBy.includes(userId)) {
-          readBy.push(userId);
-          await announcementsCollection.updateOne({ id }, { $set: { readBy } });
-        }
-        return res.json({ success: true });
-      } else if (!segments[1]) {
-        if (req.method === 'GET') {
-          const announcements = await announcementsCollection.find({}).sort({ createdAt: -1 }).toArray() as any[];
-          return res.json(announcements.map((ann: any) => ({
-            id: ann.id,
-            title: ann.title,
-            message: ann.message,
-            createdAt: new Date(ann.createdAt),
-            expiresAt: ann.expiresAt ? new Date(ann.expiresAt) : null,
-            readBy: ann.readBy || []
-          })));
-        }
-        if (req.method === 'POST') {
-          const { title, body, expiresAt } = req.body;
-          const id = uuidv4();
-          const announcement = {
-            id,
-            title,
-            message: body,
-            createdAt: new Date().toISOString(),
-            expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-            readBy: []
-          };
-          await announcementsCollection.insertOne(announcement);
-          return res.json({
-            id: announcement.id,
-            title: announcement.title,
-            message: announcement.message,
-            createdAt: new Date(announcement.createdAt),
-            expiresAt: announcement.expiresAt ? new Date(announcement.expiresAt) : null
-          });
-        }
-      }
-    }
-
-    return res.status(404).json({ error: 'Not found' });
-  } catch (error: any) {
-    console.error('API Error:', error.message);
-    return res.status(500).json({ 
+    res.status(404).json({ error: 'Not found' });
+  } catch (error: unknown) {
+    console.error('API Error:', error);
+    const message = isRecord(error) && typeof error.message === 'string' ? error.message : undefined;
+    res.status(500).json({
       error: 'Internal server error',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: process.env.NODE_ENV === 'development' ? message : undefined,
     });
   }
 }

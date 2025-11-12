@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import {
@@ -79,15 +79,7 @@ export default function Salary() {
   const [newAdvance, setNewAdvance] = useState({ date: "", amount: 0, description: "" })
   const [newPurchase, setNewPurchase] = useState({ date: "", amount: 0, description: "" })
 
-  useEffect(() => {
-    if (!user) {
-      navigate("/login")
-      return
-    }
-    loadData()
-  }, [user, navigate, selectedMonth])
-
-  const loadData = () => {
+  const loadData = useCallback(() => {
     if (isAdmin) {
       const allEmployees = store
         .getAllUsers()
@@ -96,7 +88,15 @@ export default function Salary() {
       const monthSalaries = store.getSalariesForMonth(selectedMonth)
       setSalaries(monthSalaries)
     }
-  }
+  }, [isAdmin, selectedMonth])
+
+  useEffect(() => {
+    if (!user) {
+      navigate("/login")
+      return
+    }
+    loadData()
+  }, [user, navigate, loadData])
 
   const calculateSalary = (
     data: typeof formData,
