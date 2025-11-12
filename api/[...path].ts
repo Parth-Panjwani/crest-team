@@ -54,7 +54,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  // Extract path segments - Vercel passes [...path] as req.query.path (array or string)
+  // Extract path segments from Vercel's catch-all route
+  // With [...path], Vercel passes segments as req.query.path (array)
   const pathParam = req.query.path;
   let segments: string[] = [];
   
@@ -62,18 +63,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     segments = pathParam.filter(Boolean);
   } else if (typeof pathParam === 'string') {
     segments = pathParam.split('/').filter(Boolean);
-  } else if (req.url) {
-    // Fallback: extract from URL
-    const cleanUrl = req.url.split('?')[0].split('#')[0];
-    if (cleanUrl.startsWith('/api/')) {
-      segments = cleanUrl.substring(5).split('/').filter(Boolean);
+  }
+
+  // Fallback: extract from URL if query param is missing
+  if (segments.length === 0 && req.url) {
+    const urlPath = req.url.split('?')[0].split('#')[0];
+    if (urlPath.startsWith('/api/')) {
+      segments = urlPath.substring(5).split('/').filter(Boolean);
     }
   }
 
   try {
+    // Health check endpoint
+    if (segments.length === 0 || (segments[0] === 'health' && req.method === 'GET')) {
+      return res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    }
+
     await connectToDatabase();
 
-    // Auth routes
+    // Auth: POST /api/auth/login
     if (segments[0] === 'auth' && segments[1] === 'login' && req.method === 'POST') {
       const { pin } = req.body;
       const usersCollection = await getCollection('users');
@@ -84,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(formatUser(user));
     }
 
-    // Users routes
+    // Users: GET /api/users, POST /api/users, GET /api/users/:id, PUT /api/users/:id, DELETE /api/users/:id
     if (segments[0] === 'users') {
       const usersCollection = await getCollection('users');
       if (segments[1]) {
@@ -96,23 +104,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (req.method === 'PUT') {
           const { name, role, pin, baseSalary } = req.body;
-          await usersCollection.updateOne(
-            { id },
-            { $set: { name, role, pin, baseSalary: baseSalary || null } }
-          );
+          await usersCollection.updateOne({ id }, { $set: { name, role, pin, baseSalary: baseSalary || null } });
           const user = await usersCollection.findOne({ id }) as any;
           return res.json(formatUser(user));
         }
         if (req.method === 'DELETE') {
           await usersCollection.deleteOne({ id });
-          const attendanceCollection = await getCollection('attendance');
-          await attendanceCollection.deleteMany({ userId: id });
-          const notesCollection = await getCollection('notes');
-          await notesCollection.deleteMany({ createdBy: id });
-          const leavesCollection = await getCollection('leaves');
-          await leavesCollection.deleteMany({ userId: id });
-          const salariesCollection = await getCollection('salaries');
-          await salariesCollection.deleteMany({ userId: id });
+          await getCollection('attendance').then(c => c.deleteMany({ userId: id }));
+          await getCollection('notes').then(c => c.deleteMany({ createdBy: id }));
+          await getCollection('leaves').then(c => c.deleteMany({ userId: id }));
+          await getCollection('salaries').then(c => c.deleteMany({ userId: id }));
           return res.json({ success: true });
         }
       } else {
@@ -130,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Attendance routes
+    // Attendance: POST /api/attendance/punch, GET /api/attendance/today/:userId, GET /api/attendance/history/:userId, GET /api/attendance/all
     if (segments[0] === 'attendance') {
       const attendanceCollection = await getCollection('attendance');
       if (segments[1] === 'punch' && req.method === 'POST') {
@@ -147,24 +148,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         let attendance = await attendanceCollection.findOne({ userId, date: punchDate }) as any;
-        
         if (!attendance) {
           const id = uuidv4();
-          attendance = {
-            id,
-            userId,
-            date: punchDate,
-            punches: [],
-            totals: { workMin: 0, breakMin: 0 }
-          };
+          attendance = { id, userId, date: punchDate, punches: [], totals: { workMin: 0, breakMin: 0 } };
           await attendanceCollection.insertOne(attendance);
         }
         
         const punches = (attendance.punches || []) as any[];
-        const newPunch: any = { 
-          at: punchTime.toISOString(), 
-          type 
-        };
+        const newPunch: any = { at: punchTime.toISOString(), type };
         if (manualPunch) {
           newPunch.manualPunch = true;
           newPunch.punchedBy = punchedBy;
@@ -173,122 +164,81 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         punches.push(newPunch);
         const totals = calculateTotals(punches);
         
-        await attendanceCollection.updateOne(
-          { id: attendance.id },
-          { $set: { punches, totals } }
-        );
-        
+        await attendanceCollection.updateOne({ id: attendance.id }, { $set: { punches, totals } });
         const updated = await attendanceCollection.findOne({ id: attendance.id }) as any;
         return res.json(formatAttendance(updated));
       }
 
-      if (segments[1] === 'today' && segments[2]) {
+      if (segments[1] === 'today' && segments[2] && req.method === 'GET') {
         const userId = segments[2];
         const today = new Date().toISOString().split('T')[0];
         const attendance = await attendanceCollection.findOne({ userId, date: today }) as any;
-        if (!attendance) {
-          return res.json(null);
-        }
-        return res.json(formatAttendance(attendance));
+        return res.json(attendance ? formatAttendance(attendance) : null);
       }
 
-      if (segments[1] === 'history' && segments[2]) {
+      if (segments[1] === 'history' && segments[2] && req.method === 'GET') {
         const userId = segments[2];
         const limit = parseInt(req.query.limit as string) || 30;
-        const attendances = await attendanceCollection
-          .find({ userId })
-          .sort({ date: -1 })
-          .limit(limit)
-          .toArray() as any[];
+        const attendances = await attendanceCollection.find({ userId }).sort({ date: -1 }).limit(limit).toArray() as any[];
         return res.json(attendances.map(formatAttendance));
       }
 
       if (segments[1] === 'all' && req.method === 'GET') {
-        const attendances = await attendanceCollection
-          .find({})
-          .sort({ date: -1 })
-          .toArray() as any[];
+        const attendances = await attendanceCollection.find({}).sort({ date: -1 }).toArray() as any[];
         return res.json(attendances.map(formatAttendance));
       }
     }
 
-    // Notes routes
+    // Notes: GET /api/notes, POST /api/notes, PUT /api/notes/:id, DELETE /api/notes/:id, POST /api/notes/:id/restore
     if (segments[0] === 'notes') {
       const notesCollection = await getCollection('notes');
       if (segments[1]) {
         const id = segments[1];
         if (req.method === 'PUT') {
           const { text, status, category, adminOnly } = req.body;
-          await notesCollection.updateOne(
-            { id },
-            { $set: { text, status, category, adminOnly } }
-          );
+          await notesCollection.updateOne({ id }, { $set: { text, status, category, adminOnly } });
           const note = await notesCollection.findOne({ id }) as any;
           return res.json(formatNote(note));
         }
         if (req.method === 'DELETE') {
           const { deletedBy } = req.body;
           if (deletedBy) {
-            await notesCollection.updateOne(
-              { id },
-              { $set: { deleted: true, deletedAt: new Date().toISOString(), deletedBy } }
-            );
+            await notesCollection.updateOne({ id }, { $set: { deleted: true, deletedAt: new Date().toISOString(), deletedBy } });
           } else {
             await notesCollection.deleteOne({ id });
           }
           return res.json({ success: true });
         }
         if (req.method === 'POST' && segments[2] === 'restore') {
-          await notesCollection.updateOne(
-            { id },
-            { $set: { deleted: false, deletedAt: null, deletedBy: null } }
-          );
+          await notesCollection.updateOne({ id }, { $set: { deleted: false, deletedAt: null, deletedBy: null } });
           return res.json({ success: true });
         }
       } else {
         if (req.method === 'GET') {
           const { deleted, userId } = req.query;
-          const query: any = {};
-          if (deleted === 'true') {
-            query.deleted = true;
-            if (userId) {
-              query.deletedBy = userId;
-            }
-          } else {
-            query.deleted = { $ne: true };
-          }
+          const query: any = deleted === 'true' ? { deleted: true } : { deleted: { $ne: true } };
+          if (deleted === 'true' && userId) query.deletedBy = userId;
           const notes = await notesCollection.find(query).sort({ createdAt: -1 }).toArray() as any[];
           return res.json(notes.map(formatNote));
         }
         if (req.method === 'POST') {
           const { text, createdBy, category, adminOnly } = req.body;
           const id = uuidv4();
-          const note = {
-            id,
-            text,
-            createdBy,
-            createdAt: new Date().toISOString(),
-            status: 'pending',
-            category: category || 'general',
-            adminOnly: adminOnly || false
-          };
+          const note = { id, text, createdBy, createdAt: new Date().toISOString(), status: 'pending', category: category || 'general', adminOnly: adminOnly || false };
           await notesCollection.insertOne(note);
           return res.json(formatNote(note));
         }
       }
     }
 
-    // Leaves routes
+    // Leaves: GET /api/leaves, POST /api/leaves, PUT /api/leaves/:id, DELETE /api/leaves/:id
     if (segments[0] === 'leaves') {
       const leavesCollection = await getCollection('leaves');
       if (segments[1]) {
         const id = segments[1];
         if (req.method === 'PUT') {
           const { status } = req.body;
-          await leavesCollection.updateOne(
-            { id },
-            { $set: { status } }
-          );
+          await leavesCollection.updateOne({ id }, { $set: { status } });
           const leave = await leavesCollection.findOne({ id }) as any;
           return res.json(formatLeave(leave));
         }
@@ -306,29 +256,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (req.method === 'POST') {
           const { userId, date, type, reason } = req.body;
           const id = uuidv4();
-          const leave = {
-            id,
-            userId,
-            date,
-            type,
-            reason,
-            status: 'pending'
-          };
+          const leave = { id, userId, date, type, reason, status: 'pending' };
           await leavesCollection.insertOne(leave);
           return res.json(formatLeave(leave));
         }
       }
     }
 
-    // Salaries routes
+    // Salaries: GET /api/salaries, POST /api/salaries, PUT /api/salaries, DELETE /api/salaries/:id
     if (segments[0] === 'salaries') {
       const salariesCollection = await getCollection('salaries');
-      if (segments[1]) {
-        const id = segments[1];
-        if (req.method === 'DELETE') {
-          await salariesCollection.deleteOne({ id });
-          return res.json({ success: true });
-        }
+      if (segments[1] && req.method === 'DELETE') {
+        await salariesCollection.deleteOne({ id: segments[1] });
+        return res.json({ success: true });
       } else {
         if (req.method === 'GET') {
           const { userId, month } = req.query;
@@ -341,41 +281,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (req.method === 'POST') {
           const salary = req.body;
           const id = uuidv4();
-          const newSalary = { ...salary, id };
-          await salariesCollection.insertOne(newSalary);
-          return res.json(formatSalary(newSalary));
+          await salariesCollection.insertOne({ ...salary, id });
+          return res.json(formatSalary({ ...salary, id }));
         }
         if (req.method === 'PUT') {
           const { id, ...updates } = req.body;
-          await salariesCollection.updateOne(
-            { id },
-            { $set: updates }
-          );
+          await salariesCollection.updateOne({ id }, { $set: updates });
           const updated = await salariesCollection.findOne({ id }) as any;
           return res.json(formatSalary(updated));
         }
       }
     }
 
-    // Salary History routes
-    if (segments[0] === 'salaryHistory' && req.method === 'GET') {
+    // Salary History: GET /api/salaryHistory, POST /api/salaryHistory
+    if (segments[0] === 'salaryHistory') {
       const salaryHistoryCollection = await getCollection('salaryHistory');
-      const { userId } = req.query;
-      const query: any = {};
-      if (userId) query.userId = userId;
-      const history = await salaryHistoryCollection.find(query).sort({ date: -1 }).toArray() as any[];
-      return res.json(history);
+      if (req.method === 'GET') {
+        const { userId } = req.query;
+        const query: any = userId ? { userId } : {};
+        const history = await salaryHistoryCollection.find(query).sort({ date: -1 }).toArray() as any[];
+        return res.json(history);
+      }
+      if (req.method === 'POST') {
+        const entry = req.body;
+        const id = uuidv4();
+        await salaryHistoryCollection.insertOne({ ...entry, id });
+        return res.json({ success: true });
+      }
     }
 
-    if (segments[0] === 'salaryHistory' && req.method === 'POST') {
-      const salaryHistoryCollection = await getCollection('salaryHistory');
-      const entry = req.body;
-      const id = uuidv4();
-      await salaryHistoryCollection.insertOne({ ...entry, id });
-      return res.json({ success: true });
-    }
-
-    // Pending Advances routes
+    // Pending Advances: GET /api/pendingAdvances, POST /api/pendingAdvances, PUT /api/pendingAdvances/:id, DELETE /api/pendingAdvances/:id
     if (segments[0] === 'pendingAdvances') {
       const pendingAdvancesCollection = await getCollection('pendingAdvances');
       if (req.method === 'GET') {
@@ -392,21 +327,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json({ ...advance, id, deducted: false });
       }
       if (req.method === 'PUT' && segments[1]) {
-        const id = segments[1];
-        await pendingAdvancesCollection.updateOne(
-          { id },
-          { $set: { deducted: true } }
-        );
+        await pendingAdvancesCollection.updateOne({ id: segments[1] }, { $set: { deducted: true } });
         return res.json({ success: true });
       }
       if (req.method === 'DELETE' && segments[1]) {
-        const id = segments[1];
-        await pendingAdvancesCollection.deleteOne({ id });
+        await pendingAdvancesCollection.deleteOne({ id: segments[1] });
         return res.json({ success: true });
       }
     }
 
-    // Pending Store Purchases routes
+    // Pending Store Purchases: GET /api/pendingStorePurchases, POST /api/pendingStorePurchases, PUT /api/pendingStorePurchases/:id, DELETE /api/pendingStorePurchases/:id
     if (segments[0] === 'pendingStorePurchases') {
       const pendingStorePurchasesCollection = await getCollection('pendingStorePurchases');
       if (req.method === 'GET') {
@@ -423,21 +353,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json({ ...purchase, id, deducted: false });
       }
       if (req.method === 'PUT' && segments[1]) {
-        const id = segments[1];
-        await pendingStorePurchasesCollection.updateOne(
-          { id },
-          { $set: { deducted: true } }
-        );
+        await pendingStorePurchasesCollection.updateOne({ id: segments[1] }, { $set: { deducted: true } });
         return res.json({ success: true });
       }
       if (req.method === 'DELETE' && segments[1]) {
-        const id = segments[1];
-        await pendingStorePurchasesCollection.deleteOne({ id });
+        await pendingStorePurchasesCollection.deleteOne({ id: segments[1] });
         return res.json({ success: true });
       }
     }
 
-    // Announcements routes
+    // Announcements: GET /api/announcements, POST /api/announcements, PUT /api/announcements/:id/read
     if (segments[0] === 'announcements') {
       const announcementsCollection = await getCollection('announcements');
       if (segments[1] && segments[2] === 'read' && req.method === 'PUT') {
@@ -448,18 +373,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const readBy = (announcement.readBy || []) as string[];
         if (!readBy.includes(userId)) {
           readBy.push(userId);
-          await announcementsCollection.updateOne(
-            { id },
-            { $set: { readBy } }
-          );
+          await announcementsCollection.updateOne({ id }, { $set: { readBy } });
         }
         return res.json({ success: true });
       } else if (!segments[1]) {
         if (req.method === 'GET') {
-          const announcements = await announcementsCollection
-            .find({})
-            .sort({ createdAt: -1 })
-            .toArray() as any[];
+          const announcements = await announcementsCollection.find({}).sort({ createdAt: -1 }).toArray() as any[];
           return res.json(announcements.map((ann: any) => ({
             id: ann.id,
             title: ann.title,

@@ -62,4 +62,17 @@ MongoDB connection is configured in `api/mongodb.ts`. For production, set `MONGO
 
 ## 🚢 Deployment
 
+### Prerequisites
+1. Set environment variables in Vercel:
+   - `MONGODB_URI` = Your MongoDB connection string
+   - `MONGODB_DB_NAME` = `crest-team` (optional)
+
+2. Whitelist IP in MongoDB Atlas:
+   - Go to Network Access → Add `0.0.0.0/0` (allows all IPs)
+
+### Deploy
 Push to GitHub - Vercel auto-deploys on every push.
+
+### Verify
+- Test API: `https://your-app.vercel.app/api/health` (should return `{"status":"ok"}`)
+- Test Login: `https://your-app.vercel.app/api/auth/login` (POST with `{"pin":"1234"}`)
