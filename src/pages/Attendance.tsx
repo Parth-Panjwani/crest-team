@@ -190,18 +190,18 @@ export default function Attendance() {
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-strong rounded-3xl p-6 mb-4 shadow-card border border-glass-border"
+        className="glass-strong rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-4 shadow-card border border-glass-border"
       >
-        <div className="flex justify-between items-start mb-6">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 sm:gap-4 mb-4 sm:mb-6">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center flex-shrink-0 ${
                 isComplete ? 'bg-muted/20' : 'bg-success/20'
               }`}>
-                <Calendar className={`w-6 h-6 ${isComplete ? 'text-muted-foreground' : 'text-success'}`} />
+                <Calendar className={`w-5 h-5 sm:w-6 sm:h-6 ${isComplete ? 'text-muted-foreground' : 'text-success'}`} />
               </div>
-              <div>
-                <h3 className="text-lg font-bold">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base sm:text-lg font-bold truncate">
                   {new Date(att.date).toLocaleDateString('en-US', { 
                     weekday: 'long',
                     month: 'short',
@@ -209,37 +209,37 @@ export default function Attendance() {
                   })}
                 </h3>
                 {employee && (
-                  <p className="text-sm text-muted-foreground">{employee.name}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground truncate">{employee.name}</p>
                 )}
               </div>
             </div>
           </div>
-          <div className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 ${
+          <div className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ${
             isComplete ? 'bg-muted/20 text-muted-foreground' : 'bg-success/20 text-success'
           }`}>
             {isComplete ? (
               <>
-                <CheckCircle2 className="w-4 h-4" />
-                Complete
+                <CheckCircle2 className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span>Complete</span>
               </>
             ) : (
               <>
-                <Timer className="w-4 h-4" />
-                In Progress
+                <Timer className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span>In Progress</span>
               </>
             )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="glass-card rounded-2xl p-4 border border-glass-border">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-primary" />
+        <div className="grid grid-cols-2 gap-2 sm:gap-4 mb-4 sm:mb-6">
+          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">Work Time</p>
-                <p className="text-xl font-bold">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Work Time</p>
+                <p className="text-base sm:text-lg md:text-xl font-bold">
                   {(() => {
                     // Calculate real-time work time if currently checked in
                     const checkIn = att.punches.find(p => p.type === 'IN');
@@ -283,14 +283,14 @@ export default function Attendance() {
               </div>
             </div>
           </div>
-          <div className="glass-card rounded-2xl p-4 border border-glass-border">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center">
-                <Coffee className="w-5 h-5 text-warning" />
+          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
+                <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-warning" />
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">Break Time</p>
-                <p className="text-xl font-bold">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Break Time</p>
+                <p className="text-base sm:text-lg md:text-xl font-bold">
                   {Math.floor(att.totals.breakMin / 60)}h {att.totals.breakMin % 60}m
                 </p>
               </div>
@@ -298,34 +298,34 @@ export default function Attendance() {
           </div>
         </div>
 
-        <div className="space-y-3 pt-4 border-t border-glass-border">
+        <div className="space-y-3 pt-3 sm:pt-4 border-t border-glass-border">
           {checkInOutPairs.length > 0 && (
             <div className="space-y-2">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <Clock className="w-4 h-4 text-primary" />
+              <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
+                  <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-medium">
                     {checkInOutPairs.length} {checkInOutPairs.length === 1 ? 'Session' : 'Sessions'}
                   </p>
-                  <p className="text-xs text-muted-foreground">Total: {Math.floor(att.totals.workMin / 60)}h {att.totals.workMin % 60}m</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Total: {Math.floor(att.totals.workMin / 60)}h {att.totals.workMin % 60}m</p>
                 </div>
               </div>
-              <div className="ml-11 space-y-2">
+              <div className="ml-9 sm:ml-11 space-y-2">
                 {checkInOutPairs.map((pair, index) => (
-                  <div key={index} className="glass-card rounded-xl p-3 border border-glass-border">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-semibold text-primary">Session {index + 1}</p>
+                  <div key={index} className="glass-card rounded-lg sm:rounded-xl p-2 sm:p-3 border border-glass-border">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-[10px] sm:text-xs font-semibold text-primary">Session {index + 1}</p>
                         {(pair.checkIn.manualPunch || pair.checkOut?.manualPunch) && (
-                          <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary text-[10px] border border-primary/30">
+                          <span className="px-1 sm:px-1.5 py-0.5 rounded bg-primary/20 text-primary text-[9px] sm:text-[10px] border border-primary/30">
                             Manual
                           </span>
                         )}
                       </div>
                       {pair.duration !== undefined && (
-                        <p className="text-xs font-bold">{Math.floor(pair.duration / 60)}h {pair.duration % 60}m</p>
+                        <p className="text-[10px] sm:text-xs font-bold">{Math.floor(pair.duration / 60)}h {pair.duration % 60}m</p>
                       )}
                     </div>
                     
@@ -547,14 +547,14 @@ export default function Attendance() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-8"
           >
-            <div className="flex justify-between items-start mb-6">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-bold mb-2">Staff Attendance</h1>
-                <p className="text-sm text-muted-foreground">Track and manage employee attendance</p>
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-2">Staff Attendance</h1>
+                <p className="text-xs sm:text-sm text-muted-foreground">Track and manage employee attendance</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
                 <RefreshButton />
-                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial">
                   <Button
                     onClick={() => {
                       setSelectedEmployeeForPunch(null);
@@ -569,20 +569,24 @@ export default function Attendance() {
                       setManualPunchReason('');
                       setIsManualPunchDialogOpen(true);
                     }}
-                    className="gradient-primary shadow-md hover:shadow-lg"
+                    className="w-full sm:w-auto gradient-primary shadow-md hover:shadow-lg text-sm"
+                    size="sm"
                   >
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Manual Punch
+                    <UserPlus className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Manual Punch</span>
+                    <span className="sm:hidden">Punch</span>
                   </Button>
                 </motion.div>
-                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial">
                   <Button
                     onClick={() => setClearAttendanceDialogOpen(true)}
                     variant="destructive"
-                    className="shadow-md hover:shadow-lg"
+                    className="w-full sm:w-auto shadow-md hover:shadow-lg text-sm"
+                    size="sm"
                   >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Clear All
+                    <Trash2 className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Clear All</span>
+                    <span className="sm:hidden">Clear</span>
                   </Button>
                 </motion.div>
               </div>
@@ -650,17 +654,17 @@ export default function Attendance() {
 
                 {/* Attendance Insights - Only when viewing all employees */}
                 {selectedUserId === 'all' && (
-                  <div className="glass-strong rounded-3xl p-6 border border-glass-border shadow-card">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <AlertCircle className="w-5 h-5 text-primary" />
+                  <div className="glass-strong rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-glass-border shadow-card">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                       </div>
-                      <div>
-                        <h2 className="text-lg font-bold">Attendance Insights</h2>
-                        <p className="text-xs text-muted-foreground">Overview of staff attendance patterns</p>
+                      <div className="min-w-0">
+                        <h2 className="text-base sm:text-lg font-bold">Attendance Insights</h2>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground">Overview of staff attendance patterns</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
                       {(() => {
                         const todayAttendances = allEmployees.map(emp => ({
                           employee: emp,
@@ -695,21 +699,21 @@ export default function Attendance() {
 
                         return (
                           <>
-                            <div className="glass-card rounded-xl p-4 border border-glass-border">
-                              <p className="text-xs text-muted-foreground mb-1">Checked In Today</p>
-                              <p className="text-2xl font-bold">{checkedInCount} / {allEmployees.length}</p>
+                            <div className="glass-card rounded-lg sm:rounded-xl p-3 sm:p-4 border border-glass-border">
+                              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Checked In Today</p>
+                              <p className="text-lg sm:text-2xl font-bold">{checkedInCount} / {allEmployees.length}</p>
                             </div>
-                            <div className="glass-card rounded-xl p-4 border border-glass-border">
-                              <p className="text-xs text-muted-foreground mb-1">Late Arrivals</p>
-                              <p className="text-2xl font-bold text-destructive">{lateArrivals.length}</p>
+                            <div className="glass-card rounded-lg sm:rounded-xl p-3 sm:p-4 border border-glass-border">
+                              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Late Arrivals</p>
+                              <p className="text-lg sm:text-2xl font-bold text-destructive">{lateArrivals.length}</p>
                             </div>
-                            <div className="glass-card rounded-xl p-4 border border-glass-border">
-                              <p className="text-xs text-muted-foreground mb-1">Avg Late Time</p>
-                              <p className="text-2xl font-bold">{lateArrivals.length > 0 ? formatMinutesToHours(Math.round(avgLateMinutes)) : '0m'}</p>
+                            <div className="glass-card rounded-lg sm:rounded-xl p-3 sm:p-4 border border-glass-border">
+                              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Avg Late Time</p>
+                              <p className="text-lg sm:text-2xl font-bold">{lateArrivals.length > 0 ? formatMinutesToHours(Math.round(avgLateMinutes)) : '0m'}</p>
                             </div>
-                            <div className="glass-card rounded-xl p-4 border border-glass-border">
-                              <p className="text-xs text-muted-foreground mb-1">On Time Rate</p>
-                              <p className="text-2xl font-bold text-success">
+                            <div className="glass-card rounded-lg sm:rounded-xl p-3 sm:p-4 border border-glass-border">
+                              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">On Time Rate</p>
+                              <p className="text-lg sm:text-2xl font-bold text-success">
                                 {todayAttendances.length > 0 
                                   ? Math.round(((todayAttendances.length - lateArrivals.length) / todayAttendances.length) * 100)
                                   : 0}%
@@ -807,102 +811,104 @@ export default function Attendance() {
                                 return (
                                   <>
                                     {checkIn && (
-                                      <div className={`mb-3 p-3 rounded-lg border ${
+                                      <div className={`mb-3 p-2 sm:p-3 rounded-lg border ${
                                         isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus
                                           ? 'border-warning/50 bg-warning/5'
                                           : isLate && checkIn.lateApprovalStatus === 'approved'
-                                          ? 'border-success/50 bg-success/5'
-                                          : 'border-glass-border bg-card'
+                                            ? 'border-success/50 bg-success/5'
+                                            : 'border-glass-border bg-card'
                                       }`}>
-                                        <div className="flex items-center justify-between mb-2">
-                                          <div className="flex items-center gap-2">
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                                          <div className="flex items-center gap-2 flex-wrap">
                                             <span className="text-xs font-medium text-muted-foreground">Check In</span>
                                             {isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus && (
-                                              <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold animate-pulse">
+                                              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold animate-pulse">
                                                 Action Required
                                               </span>
                                             )}
                                           </div>
                                           {isLate ? (
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30 font-semibold">
+                                            <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30 font-semibold self-start sm:self-auto">
                                               {formatMinutesToHours(lateMinutes)} late
                                             </span>
                                           ) : checkIn.status === 'on-time' ? (
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success border border-success/30">
+                                            <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-success/20 text-success border border-success/30 self-start sm:self-auto">
                                               On Time
                                             </span>
                                           ) : checkIn.status === 'early' ? (
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30">
+                                            <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 self-start sm:self-auto">
                                               Early
                                             </span>
                                           ) : null}
                                         </div>
-                                        <p className="text-sm font-bold mb-1">{formatTime(checkIn.at)}</p>
+                                        <p className="text-xs sm:text-sm font-bold mb-1">{formatTime(checkIn.at)}</p>
                                         {isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus && (
                                           <div className="mt-2 p-2 rounded bg-warning/10 border border-warning/20">
-                                            <p className="text-xs font-medium text-warning flex items-center gap-1">
-                                              <AlertCircle className="w-3 h-3" />
-                                              Pending Approval
+                                            <p className="text-[10px] sm:text-xs font-medium text-warning flex items-center gap-1">
+                                              <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                                              <span>Pending Approval</span>
                                             </p>
-                                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                                            <p className="text-[9px] sm:text-[10px] text-muted-foreground mt-0.5">
                                               Review in Pending Approvals section
                                             </p>
                                           </div>
                                         )}
                                         {isLate && checkIn.lateApprovalStatus === 'approved' && (
                                           <div className="mt-2 p-2 rounded bg-success/10 border border-success/20">
-                                            <p className="text-xs font-medium text-success flex items-center gap-1">
-                                              <CheckCircle2 className="w-3 h-3" />
-                                              Approved
+                                            <p className="text-[10px] sm:text-xs font-medium text-success flex items-center gap-1">
+                                              <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
+                                              <span>Approved</span>
                                             </p>
                                           </div>
                                         )}
                                       </div>
                                     )}
-                                    <div className="grid grid-cols-2 gap-3 mb-4">
-                                      <div className="glass-card rounded-xl p-3 border border-glass-border">
-                                        <p className="text-xs text-muted-foreground mb-1">Work Time</p>
-                                        <p className="text-lg font-bold">
+                                    <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
+                                      <div className="glass-card rounded-xl p-2 sm:p-3 border border-glass-border">
+                                        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Work Time</p>
+                                        <p className="text-base sm:text-lg font-bold">
                                           {Math.floor((empAttendance.totals.workMin || 0) / 60)}h {(empAttendance.totals.workMin || 0) % 60}m
                                         </p>
                                       </div>
-                                      <div className="glass-card rounded-xl p-3 border border-glass-border">
-                                        <p className="text-xs text-muted-foreground mb-1">Break Time</p>
-                                        <p className="text-lg font-bold">
+                                      <div className="glass-card rounded-xl p-2 sm:p-3 border border-glass-border">
+                                        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Break Time</p>
+                                        <p className="text-base sm:text-lg font-bold">
                                           {Math.floor((empAttendance.totals.breakMin || 0) / 60)}h {(empAttendance.totals.breakMin || 0) % 60}m
                                         </p>
                                       </div>
                                     </div>
                                     {checkOut && (
-                                      <div className={`mb-2 p-3 rounded-lg border ${
+                                      <div className={`mb-2 p-2 sm:p-3 rounded-lg border ${
                                         checkOut.status === 'overtime'
                                           ? 'border-primary/50 bg-primary/5'
                                           : checkOut.status === 'early'
-                                          ? 'border-warning/50 bg-warning/5'
-                                          : 'border-glass-border bg-card'
+                                            ? 'border-warning/50 bg-warning/5'
+                                            : 'border-glass-border bg-card'
                                       }`}>
-                                        <div className="flex items-center justify-between mb-1">
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-1">
                                           <span className="text-xs font-medium text-muted-foreground">Check Out</span>
-                                          {checkOut.status === 'overtime' && (
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 font-semibold">
-                                              Overtime
-                                            </span>
-                                          )}
-                                          {checkOut.status === 'early' && (
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold">
-                                              Early
-                                            </span>
-                                          )}
+                                          <div className="flex gap-2">
+                                            {checkOut.status === 'overtime' && (
+                                              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 font-semibold">
+                                                Overtime
+                                              </span>
+                                            )}
+                                            {checkOut.status === 'early' && (
+                                              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold">
+                                                Early
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
-                                        <p className="text-sm font-bold">{formatTime(checkOut.at)}</p>
+                                        <p className="text-xs sm:text-sm font-bold">{formatTime(checkOut.at)}</p>
                                         {checkOut.statusMessage && (
-                                          <p className="text-xs text-muted-foreground mt-1">{checkOut.statusMessage}</p>
+                                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">{checkOut.statusMessage}</p>
                                         )}
                                       </div>
                                     )}
                                     {lastPunch && !checkOut && (
-                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                        <Clock className="w-3 h-3" />
+                                      <div className="flex items-center gap-2 text-[10px] sm:text-xs text-muted-foreground">
+                                        <Clock className="w-3 h-3 flex-shrink-0" />
                                         <span>Last: {formatTime(lastPunch.at)}</span>
                                       </div>
                                     )}
@@ -943,33 +949,33 @@ export default function Attendance() {
 
               <TabsContent value="my-attendance" className="space-y-6">
                 {/* My Attendance Status Card */}
-                <div className="glass-strong rounded-3xl p-6 md:p-8 shadow-card border border-glass-border">
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
+                <div className="glass-strong rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 shadow-card border border-glass-border">
+                  <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+                    <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center flex-shrink-0 ${
                       myStatus === 'checked-in' ? 'bg-success/20' :
                       myStatus === 'on-break' ? 'bg-warning/20' :
                       myStatus === 'checked-out' ? 'bg-muted/20' :
                       'bg-muted/20'
                     }`}>
                       {myStatus === 'checked-in' ? (
-                        <CheckCircle2 className="w-8 h-8 text-success" />
+                        <CheckCircle2 className="w-6 h-6 sm:w-8 sm:h-8 text-success" />
                       ) : myStatus === 'on-break' ? (
-                        <Coffee className="w-8 h-8 text-warning" />
+                        <Coffee className="w-6 h-6 sm:w-8 sm:h-8 text-warning" />
                       ) : myStatus === 'checked-out' ? (
-                        <XCircle className="w-8 h-8 text-muted-foreground" />
+                        <XCircle className="w-6 h-6 sm:w-8 sm:h-8 text-muted-foreground" />
                       ) : (
-                        <Clock className="w-8 h-8 text-muted-foreground" />
+                        <Clock className="w-6 h-6 sm:w-8 sm:h-8 text-muted-foreground" />
                       )}
                     </div>
-                    <div className="flex-1">
-                      <h2 className="text-2xl font-bold mb-1">
+                    <div className="flex-1 min-w-0">
+                      <h2 className="text-lg sm:text-xl md:text-2xl font-bold mb-1">
                         {myStatus === 'checked-in' ? 'Checked In' :
                          myStatus === 'on-break' ? 'On Break' :
                          myStatus === 'checked-out' ? 'Checked Out' :
                          'Not Checked In'}
                       </h2>
                       {lastPunch && (
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-xs sm:text-sm text-muted-foreground">
                           Since {formatTime(lastPunch.at)}
                         </p>
                       )}
@@ -977,28 +983,28 @@ export default function Attendance() {
                   </div>
 
                   {myAttendance && (
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                      <div className="glass-card rounded-2xl p-4 border border-glass-border">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                            <Clock className="w-5 h-5 text-primary" />
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
+                      <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                        <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                           </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground font-medium">Work Time</p>
-                            <p className="text-2xl font-bold">
+                          <div className="min-w-0">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Work Time</p>
+                            <p className="text-lg sm:text-xl md:text-2xl font-bold">
                               {Math.floor((myAttendance.totals.workMin || 0) / 60)}h {(myAttendance.totals.workMin || 0) % 60}m
                             </p>
                           </div>
                         </div>
                       </div>
-                      <div className="glass-card rounded-2xl p-4 border border-glass-border">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center">
-                            <Coffee className="w-5 h-5 text-warning" />
+                      <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                        <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
+                            <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-warning" />
                           </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground font-medium">Break Time</p>
-                            <p className="text-2xl font-bold">
+                          <div className="min-w-0">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Break Time</p>
+                            <p className="text-lg sm:text-xl md:text-2xl font-bold">
                               {Math.floor((myAttendance.totals.breakMin || 0) / 60)}h {(myAttendance.totals.breakMin || 0) % 60}m
                             </p>
                           </div>
@@ -1065,22 +1071,22 @@ export default function Attendance() {
 
                 {/* My Attendance History */}
                 <div>
-                  <h2 className="text-xl font-bold mb-4">My Attendance History</h2>
-                  <div className="glass-strong rounded-3xl p-4 md:p-6 mb-6 border border-glass-border shadow-card">
-                    <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                          <Filter className="w-5 h-5 text-primary" />
+                  <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4">My Attendance History</h2>
+                  <div className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 mb-4 sm:mb-6 border border-glass-border shadow-card">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center">
+                          <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                         </div>
-                        <span className="text-sm font-semibold">Filter</span>
+                        <span className="text-xs sm:text-sm font-semibold">Filter</span>
                       </div>
                       
-                      <div className="flex-1 w-full md:w-auto min-w-[200px]">
+                      <div className="flex-1 w-full sm:w-auto min-w-0">
                         <input
                           type="date"
                           value={selectedDate}
                           onChange={(e) => setSelectedDate(e.target.value)}
-                          className="w-full px-4 py-2 rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          className="w-full px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
                         />
                       </div>
 
@@ -1093,10 +1099,12 @@ export default function Attendance() {
                             setSelectedDate(today);
                           }
                         }}
-                        className={selectedDate === today ? 'gradient-primary shadow-md' : ''}
+                        className={`w-full sm:w-auto ${selectedDate === today ? 'gradient-primary shadow-md' : ''} text-sm`}
+                        size="sm"
                       >
-                        <Calendar className="w-4 h-4 mr-2" />
-                        Today
+                        <Calendar className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Today</span>
+                        <span className="sm:hidden">Today</span>
                       </Button>
                     </div>
                   </div>
