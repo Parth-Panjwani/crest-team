@@ -1,6 +1,9 @@
 // API Configuration
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000';
+// In development, use localhost
+// In production on Vercel, use relative URLs (same origin)
+// Only use absolute URLs if explicitly set via environment variables
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+export const WS_URL = import.meta.env.VITE_WS_URL || '';
 
 // Helper to get API URL
 export function getApiUrl(endpoint: string): string {

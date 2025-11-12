@@ -309,8 +309,9 @@ class Store {
     this.loadingPromise = (async () => {
       try {
         // In development, use relative URL to leverage Vite proxy
-        // In production, use full API URL from environment
-        const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+        // In production on Vercel, use relative URL (same origin)
+        // Only use absolute URL if VITE_API_URL is explicitly set
+        const apiBase = import.meta.env.VITE_API_URL || '';
         const bootstrapUrl = apiBase ? `${apiBase}/api/bootstrap` : '/api/bootstrap';
         const response = await fetch(bootstrapUrl);
 
@@ -414,8 +415,9 @@ class Store {
   ): Promise<TResponse> {
     try {
       // In development, use relative URL to leverage Vite proxy
-      // In production, use full API URL from environment
-      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      // In production on Vercel, use relative URL (same origin)
+      // Only use absolute URL if VITE_API_URL is explicitly set
+      const apiBase = import.meta.env.VITE_API_URL || '';
       const apiUrl = apiBase ? `${apiBase}/api/${endpoint}` : `/api/${endpoint}`;
       const response = await fetch(apiUrl, {
         method,
@@ -468,8 +470,9 @@ class Store {
   // Auth - ALWAYS uses MongoDB, no localStorage fallback
   async login(pin: string): Promise<User | null> {
     // In development, use relative URL to leverage Vite proxy
-    // In production, use full API URL from environment
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    // In production on Vercel, use relative URL (same origin)
+    // Only use absolute URL if VITE_API_URL is explicitly set
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const loginUrl = apiBase ? `${apiBase}/api/auth/login` : '/api/auth/login';
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -1017,7 +1020,7 @@ class Store {
   // Notifications
   async loadNotifications(userId: string): Promise<void> {
     try {
-      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      const apiBase = import.meta.env.VITE_API_URL || '';
       const url = apiBase ? `${apiBase}/api/notifications?userId=${userId}` : `/api/notifications?userId=${userId}`;
       const response = await fetch(url);
       if (!response.ok) {
@@ -1043,7 +1046,7 @@ class Store {
 
   async markNotificationAsRead(notificationId: string): Promise<void> {
     try {
-      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      const apiBase = import.meta.env.VITE_API_URL || '';
       const url = apiBase ? `${apiBase}/api/notifications/${notificationId}/read` : `/api/notifications/${notificationId}/read`;
       await fetch(url, { method: 'PUT' });
       const notification = this.notifications.find(n => n.id === notificationId);
@@ -1057,8 +1060,8 @@ class Store {
 
   async markAllNotificationsAsRead(userId: string): Promise<void> {
     try {
-      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
-      const url = apiBase ? `${apiBase}/api/notifications/read-all` : '/api/notifications/read-all';
+    const apiBase = import.meta.env.VITE_API_URL || '';
+    const url = apiBase ? `${apiBase}/api/notifications/read-all` : '/api/notifications/read-all';
       await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1076,7 +1079,7 @@ class Store {
 
   // Late Permissions
   async requestLatePermission(userId: string, date: string, reason: string, expectedArrivalTime?: string): Promise<LatePermission> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const url = apiBase ? `${apiBase}/api/latePermissions` : '/api/latePermissions';
     const response = await fetch(url, {
       method: 'POST',
@@ -1090,7 +1093,7 @@ class Store {
   }
 
   async getLatePermissions(userId: string, status?: string): Promise<LatePermission[]> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const statusParam = status ? `?status=${status}` : '';
     const url = apiBase ? `${apiBase}/api/latePermissions/user/${userId}${statusParam}` : `/api/latePermissions/user/${userId}${statusParam}`;
     const response = await fetch(url);
@@ -1101,7 +1104,7 @@ class Store {
   }
 
   async getPendingLatePermissions(): Promise<LatePermission[]> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const url = apiBase ? `${apiBase}/api/latePermissions/pending` : '/api/latePermissions/pending';
     const response = await fetch(url);
     if (!response.ok) {
@@ -1111,7 +1114,7 @@ class Store {
   }
 
   async updateLatePermissionStatus(id: string, status: 'approved' | 'rejected', approvedBy: string, rejectionReason?: string): Promise<LatePermission> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const url = apiBase ? `${apiBase}/api/latePermissions/${id}/status` : `/api/latePermissions/${id}/status`;
     const response = await fetch(url, {
       method: 'PUT',
@@ -1126,7 +1129,7 @@ class Store {
 
   // Late Approvals
   async getPendingLateApprovals(): Promise<LateApproval[]> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const url = apiBase ? `${apiBase}/api/lateApprovals/pending` : '/api/lateApprovals/pending';
     const response = await fetch(url);
     if (!response.ok) {
@@ -1136,7 +1139,7 @@ class Store {
   }
 
   async getUserLateApprovals(userId: string): Promise<LateApproval[]> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const url = apiBase ? `${apiBase}/api/lateApprovals/user/${userId}` : `/api/lateApprovals/user/${userId}`;
     const response = await fetch(url);
     if (!response.ok) {
@@ -1146,7 +1149,7 @@ class Store {
   }
 
   async updateLateApprovalStatus(id: string, status: 'approved' | 'rejected', approvedBy: string, rejectionReason?: string, adminNotes?: string): Promise<LateApproval> {
-    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const apiBase = import.meta.env.VITE_API_URL || '';
     const url = apiBase ? `${apiBase}/api/lateApprovals/${id}/status` : `/api/lateApprovals/${id}/status`;
     const response = await fetch(url, {
       method: 'PUT',

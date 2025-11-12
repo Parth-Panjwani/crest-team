@@ -28,13 +28,20 @@ export function useWebSocket(
     const connect = () => {
       try {
         // In development, connect directly to backend WebSocket
-        // In production, use WebSocket URL from environment
+        // In production on Vercel, WebSocket is not supported via serverless functions
+        // For now, skip WebSocket in production (real-time updates will work via polling/refresh)
         let wsUrl: string;
         if (import.meta.env.DEV) {
           // Development: connect directly to backend
           wsUrl = `ws://localhost:3000?userId=${userId}`;
         } else {
-          wsUrl = getWebSocketUrl(userId);
+          const wsUrlFromEnv = getWebSocketUrl(userId);
+          // If no WebSocket URL is configured, skip WebSocket (Vercel serverless doesn't support WS)
+          if (!wsUrlFromEnv || wsUrlFromEnv === '') {
+            console.log('⚠️  WebSocket not configured for production. Real-time updates disabled.');
+            return;
+          }
+          wsUrl = wsUrlFromEnv;
         }
         console.log('🔌 Connecting to WebSocket:', wsUrl);
         
