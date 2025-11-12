@@ -45,19 +45,19 @@ export interface Attendance {
 }
 
 export interface Note {
-  id: string;
-  text: string;
-  createdBy: string;
-  createdAt: Date;
-  status: 'pending' | 'done';
-  category: 'order' | 'general' | 'reminder';
-  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock'; // Only for reminder category
-  adminOnly: boolean;
-  completedBy?: string;
-  completedAt?: Date;
-  deleted?: boolean;
-  deletedAt?: Date;
-  deletedBy?: string;
+  id: string
+  text: string
+  createdBy: string
+  createdAt: Date
+  status: "pending" | "done"
+  category: "order" | "general" | "reminder"
+  subCategory?: "refill-stock" | "remove-from-stock" | "out-of-stock" // Only for reminder category
+  adminOnly: boolean
+  completedBy?: string
+  completedAt?: Date
+  deleted?: boolean
+  deletedAt?: Date
+  deletedBy?: string
 }
 
 export interface Leave {
@@ -198,11 +198,12 @@ interface AttendancePayload extends Omit<Attendance, 'punches'> {
   punches: PunchPayload[];
 }
 
-interface NotePayload extends Omit<Note, 'createdAt' | 'completedAt' | 'deletedAt'> {
-  createdAt: string;
-  completedAt?: string | null;
-  deletedAt?: string | null;
-  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock';
+interface NotePayload
+  extends Omit<Note, "createdAt" | "completedAt" | "deletedAt"> {
+  createdAt: string
+  completedAt?: string | null
+  deletedAt?: string | null
+  subCategory?: "refill-stock" | "remove-from-stock" | "out-of-stock"
 }
 
 interface SalaryPayload extends Omit<Salary, 'advances' | 'storePurchases' | 'paid'> {
@@ -578,53 +579,59 @@ class Store {
     const user = this.users.find(u => u.id === id);
     if (user) {
       // Track salary changes
-      if (updates.baseSalary !== undefined && updates.baseSalary !== user.baseSalary) {
+      if (
+        updates.baseSalary !== undefined &&
+        updates.baseSalary !== user.baseSalary
+      ) {
         const historyEntry: SalaryHistory = {
           id: Date.now().toString(),
           userId: id,
           date: new Date().toISOString(),
           oldBaseSalary: user.baseSalary || null,
           newBaseSalary: updates.baseSalary,
-          changedBy: this.currentUser?.id || 'system',
+          changedBy: this.currentUser?.id || "system",
           reason: reason,
-        };
-        this.salaryHistory.push(historyEntry);
+        }
+        this.salaryHistory.push(historyEntry)
         // Save salary history to MongoDB
-        await this.syncToAPI('salaryHistory', 'POST', historyEntry);
-      }
-      
-      Object.assign(user, updates);
-      this.users.sort((a, b) => a.name.localeCompare(b.name));
-      this.usersById.set(id, user);
-      if (this.currentUser?.id === id) {
-        this.currentUser = user;
+        await this.syncToAPI("salaryHistory", "POST", historyEntry)
       }
 
-      const updated = await this.syncToAPI<User>(`users/${id}`, 'PUT', { ...user, ...updates });
-      if (updated) {
-        Object.assign(user, updated);
-        this.users.sort((a, b) => a.name.localeCompare(b.name));
-        this.usersById.set(id, user);
+      Object.assign(user, updates)
+      this.users.sort((a, b) => a.name.localeCompare(b.name))
+      this.usersById.set(id, user)
+      if (this.currentUser?.id === id) {
+        this.currentUser = user
       }
-      
+
+      const updated = await this.syncToAPI<User>(`users/${id}`, "PUT", {
+        ...user,
+        ...updates,
+      })
+      if (updated) {
+        Object.assign(user, updated)
+        this.users.sort((a, b) => a.name.localeCompare(b.name))
+        this.usersById.set(id, user)
+      }
+
       // Auto-refresh after CRUD operation
-      await this.refreshData();
-      return user;
+      await this.refreshData()
+      return user
     }
     return null;
   }
 
   async deleteUser(id: string): Promise<boolean> {
     if (this.currentUser?.id === id) {
-      return false;
+      return false
     }
 
-    await this.syncToAPI(`users/${id}`, 'DELETE');
-    this.users = this.users.filter(u => u.id !== id);
-    this.usersById.delete(id);
+    await this.syncToAPI(`users/${id}`, "DELETE")
+    this.users = this.users.filter((u) => u.id !== id)
+    this.usersById.delete(id)
     // Auto-refresh after CRUD operation
-    await this.refreshData();
-    return true;
+    await this.refreshData()
+    return true
   }
 
   getSalaryHistory(userId: string): SalaryHistory[] {
@@ -641,68 +648,83 @@ class Store {
   }
 
   async clearAttendance(adminId: string): Promise<{ message: string; deletedCount: number }> {
-    await this.ensureDataLoaded();
-    const result = await this.syncToAPI<{ message: string; deletedCount: number }>(
-      'attendance/clear',
-      'DELETE',
-      { adminId }
-    );
+    await this.ensureDataLoaded()
+    const result = await this.syncToAPI<{
+      message: string
+      deletedCount: number
+    }>("attendance/clear", "DELETE", { adminId })
     // Auto-refresh after CRUD operation
-    await this.refreshData();
-    return result;
+    await this.refreshData()
+    return result
   }
 
   async punch(userId: string, type: Punch['type'], options?: { manualPunch?: boolean; punchedBy?: string; reason?: string; customTime?: Date }) {
     // For break punches, reason is required (unless it's a manual punch by admin)
-    if ((type === 'BREAK_START' || type === 'BREAK_END') && !options?.reason && !options?.manualPunch) {
-      throw new Error('Reason is required for break punches');
+    if (
+      (type === "BREAK_START" || type === "BREAK_END") &&
+      !options?.reason &&
+      !options?.manualPunch
+    ) {
+      throw new Error("Reason is required for break punches")
     }
-    
-    const punchTime = options?.customTime || new Date();
-    const punchDate = punchTime.toISOString().split('T')[0];
-    
+
+    const punchTime = options?.customTime || new Date()
+    const punchDate = punchTime.toISOString().split("T")[0]
+
     // Check if user has an open attendance from a previous day (only for regular punches, not manual with custom time)
     if (!options?.customTime) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      
-      await this.ensureDataLoaded();
-      const yesterdayAtt = this.attendance.find(a => 
-        a.userId === userId && 
-        a.date === yesterdayStr &&
-        a.punches.length > 0 &&
-        a.punches[a.punches.length - 1].type !== 'OUT'
-      );
-      
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yesterdayStr = yesterday.toISOString().split("T")[0]
+
+      await this.ensureDataLoaded()
+      const yesterdayAtt = this.attendance.find(
+        (a) =>
+          a.userId === userId &&
+          a.date === yesterdayStr &&
+          a.punches.length > 0 &&
+          a.punches[a.punches.length - 1].type !== "OUT"
+      )
+
       // If user was checked in from yesterday and checking in today, auto-checkout yesterday
-      if (yesterdayAtt && type === 'IN') {
-        const lastPunch = yesterdayAtt.punches[yesterdayAtt.punches.length - 1];
-        if (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END') {
-          const midnight = new Date(yesterdayStr);
-          midnight.setHours(23, 59, 59, 999);
-          yesterdayAtt.punches.push({ at: midnight, type: 'OUT' });
-          this.calculateTotals(yesterdayAtt);
-          await this.syncToAPI('attendance/punch', 'POST', { userId, type: 'OUT', date: yesterdayStr });
+      if (yesterdayAtt && type === "IN") {
+        const lastPunch = yesterdayAtt.punches[yesterdayAtt.punches.length - 1]
+        if (lastPunch.type === "IN" || lastPunch.type === "BREAK_END") {
+          const midnight = new Date(yesterdayStr)
+          midnight.setHours(23, 59, 59, 999)
+          yesterdayAtt.punches.push({ at: midnight, type: "OUT" })
+          this.calculateTotals(yesterdayAtt)
+          await this.syncToAPI("attendance/punch", "POST", {
+            userId,
+            type: "OUT",
+            date: yesterdayStr,
+          })
         }
       }
     }
-    
+
     // Sync punch to MongoDB
-    const result = await this.syncToAPI<AttendancePayload>('attendance/punch', 'POST', {
-      userId,
-      type,
-      manualPunch: options?.manualPunch || false,
-      punchedBy: options?.punchedBy,
-      reason: options?.reason,
-      customTime: options?.customTime?.toISOString()
-    });
+    const result = await this.syncToAPI<AttendancePayload>(
+      "attendance/punch",
+      "POST",
+      {
+        userId,
+        type,
+        manualPunch: options?.manualPunch || false,
+        punchedBy: options?.punchedBy,
+        reason: options?.reason,
+        customTime: options?.customTime?.toISOString(),
+      }
+    )
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
     return {
       ...result,
-      punches: result.punches.map(punch => ({ ...punch, at: new Date(punch.at) })),
-    };
+      punches: result.punches.map((punch) => ({
+        ...punch,
+        at: new Date(punch.at),
+      })),
+    }
   }
 
   private calculateTotals(att: Attendance) {
@@ -753,11 +775,11 @@ class Store {
     const note = await this.syncToAPI<NotePayload>('notes', 'POST', { text, createdBy: userId, category, adminOnly, subCategory });
     if (note) {
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
       return {
         ...note,
         createdAt: new Date(note.createdAt),
-      };
+      }
     }
     throw new Error('Failed to create note');
   }
@@ -765,38 +787,38 @@ class Store {
   async updateNote(id: string, updates: Partial<Note>) {
     const note = this.notes.find(n => n.id === id);
     if (note) {
-      Object.assign(note, updates);
-      await this.syncToAPI(`notes/${id}`, 'PUT', updates);
+      Object.assign(note, updates)
+      await this.syncToAPI(`notes/${id}`, "PUT", updates)
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
     }
   }
 
   async deleteNote(id: string, deletedBy?: string) {
     const note = this.notes.find(n => n.id === id);
     if (note) {
-      await this.syncToAPI(`notes/${id}`, 'DELETE', { deletedBy });
+      await this.syncToAPI(`notes/${id}`, "DELETE", { deletedBy })
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
     }
   }
 
   async restoreNote(id: string) {
     const note = this.notes.find(n => n.id === id);
     if (note) {
-      note.deleted = false;
-      note.deletedAt = undefined;
-      note.deletedBy = undefined;
-      await this.syncToAPI(`notes/${id}/restore`, 'POST', {});
+      note.deleted = false
+      note.deletedAt = undefined
+      note.deletedBy = undefined
+      await this.syncToAPI(`notes/${id}/restore`, "POST", {})
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
     }
   }
 
   async permanentDeleteNote(id: string) {
-    await this.syncToAPI(`notes/${id}/permanent`, 'DELETE', {});
+    await this.syncToAPI(`notes/${id}/permanent`, "DELETE", {})
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
   }
 
   getNotes(status?: 'pending' | 'done', showAdminOnly: boolean = false, currentUserId?: string): Note[] {
@@ -832,16 +854,20 @@ class Store {
     const leave = await this.syncToAPI<Leave>('leaves', 'POST', { userId, date, type, reason });
     if (leave) {
       // Auto-refresh after CRUD operation
-      await this.refreshData();
-      return leave;
+      await this.refreshData()
+      return leave
     }
     throw new Error('Failed to create leave');
   }
 
   async updateLeaveStatus(id: string, status: 'approved' | 'rejected', salaryDeduction?: boolean, approvedBy?: string) {
-    await this.syncToAPI(`leaves/${id}`, 'PUT', { status, salaryDeduction, approvedBy });
+    await this.syncToAPI(`leaves/${id}`, "PUT", {
+      status,
+      salaryDeduction,
+      approvedBy,
+    })
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
   }
 
   getUserLeaves(userId: string): Leave[] {
@@ -863,14 +889,16 @@ class Store {
   }
 
   async updateSalary(salary: Salary) {
-    const advances = salary.advances || [];
-    const storePurchases = salary.storePurchases || [];
-    const totalDeductions = advances.reduce((sum, a) => sum + (a.amount || 0), 0) +
-                           storePurchases.reduce((sum, p) => sum + (p.amount || 0), 0);
-    
-    const calcPay = salary.type === 'hourly' ? salary.base * salary.hours : salary.base;
-    const finalPay = calcPay + (salary.adjustments || 0) - totalDeductions;
-    
+    const advances = salary.advances || []
+    const storePurchases = salary.storePurchases || []
+    const totalDeductions =
+      advances.reduce((sum, a) => sum + (a.amount || 0), 0) +
+      storePurchases.reduce((sum, p) => sum + (p.amount || 0), 0)
+
+    const calcPay =
+      salary.type === "hourly" ? salary.base * salary.hours : salary.base
+    const finalPay = calcPay + (salary.adjustments || 0) - totalDeductions
+
     const updatedSalary: Salary = {
       ...salary,
       calcPay,
@@ -878,21 +906,27 @@ class Store {
       storePurchases,
       totalDeductions,
       finalPay,
-    };
-    
-    const synced = await this.syncToAPI<SalaryPayload>('salaries', 'POST', updatedSalary);
+    }
+
+    const synced = await this.syncToAPI<SalaryPayload>(
+      "salaries",
+      "POST",
+      updatedSalary
+    )
     if (synced) {
       Object.assign(updatedSalary, {
         ...synced,
         advances: Array.isArray(synced.advances) ? synced.advances : [],
-        storePurchases: Array.isArray(synced.storePurchases) ? synced.storePurchases : [],
+        storePurchases: Array.isArray(synced.storePurchases)
+          ? synced.storePurchases
+          : [],
         paid: Boolean(synced.paid),
         paidDate: synced.paidDate ?? undefined,
-      });
+      })
     }
-    
+
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
   }
 
   getSalariesForMonth(month: string): Salary[] {
@@ -910,9 +944,9 @@ class Store {
   }
 
   async deleteSalary(id: string) {
-    await this.syncToAPI(`salaries/${id}`, 'DELETE');
+    await this.syncToAPI(`salaries/${id}`, "DELETE")
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
   }
 
   // Pending Advances
@@ -920,8 +954,8 @@ class Store {
     const advance = await this.syncToAPI<PendingAdvance>('pendingAdvances', 'POST', { userId, date, amount, description });
     if (advance) {
       // Auto-refresh after CRUD operation
-      await this.refreshData();
-      return advance;
+      await this.refreshData()
+      return advance
     }
     throw new Error('Failed to create advance');
   }
@@ -938,18 +972,18 @@ class Store {
   async markAdvanceAsDeducted(advanceId: string, salaryId: string) {
     const advance = this.pendingAdvances.find(a => a.id === advanceId);
     if (advance) {
-      advance.deducted = true;
-      advance.deductedInSalaryId = salaryId;
-      await this.syncToAPI(`pendingAdvances/${advanceId}`, 'PUT', { salaryId });
+      advance.deducted = true
+      advance.deductedInSalaryId = salaryId
+      await this.syncToAPI(`pendingAdvances/${advanceId}`, "PUT", { salaryId })
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
     }
   }
 
   async deletePendingAdvance(id: string) {
-    await this.syncToAPI(`pendingAdvances/${id}`, 'DELETE');
+    await this.syncToAPI(`pendingAdvances/${id}`, "DELETE")
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
   }
 
   // Pending Store Purchases
@@ -957,8 +991,8 @@ class Store {
     const purchase = await this.syncToAPI<PendingStorePurchase>('pendingStorePurchases', 'POST', { userId, date, amount, description });
     if (purchase) {
       // Auto-refresh after CRUD operation
-      await this.refreshData();
-      return purchase;
+      await this.refreshData()
+      return purchase
     }
     throw new Error('Failed to create store purchase');
   }
@@ -975,18 +1009,20 @@ class Store {
   async markStorePurchaseAsDeducted(purchaseId: string, salaryId: string) {
     const purchase = this.pendingStorePurchases.find(p => p.id === purchaseId);
     if (purchase) {
-      purchase.deducted = true;
-      purchase.deductedInSalaryId = salaryId;
-      await this.syncToAPI(`pendingStorePurchases/${purchaseId}`, 'PUT', { salaryId });
+      purchase.deducted = true
+      purchase.deductedInSalaryId = salaryId
+      await this.syncToAPI(`pendingStorePurchases/${purchaseId}`, "PUT", {
+        salaryId,
+      })
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
     }
   }
 
   async deletePendingStorePurchase(id: string) {
-    await this.syncToAPI(`pendingStorePurchases/${id}`, 'DELETE');
+    await this.syncToAPI(`pendingStorePurchases/${id}`, "DELETE")
     // Auto-refresh after CRUD operation
-    await this.refreshData();
+    await this.refreshData()
   }
 
   // Announcements
@@ -994,12 +1030,14 @@ class Store {
     const announcement = await this.syncToAPI<AnnouncementPayload>('announcements', 'POST', { title, body });
     if (announcement) {
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
       return {
         ...announcement,
         createdAt: new Date(announcement.createdAt),
-        expiresAt: announcement.expiresAt ? new Date(announcement.expiresAt) : undefined,
-      };
+        expiresAt: announcement.expiresAt
+          ? new Date(announcement.expiresAt)
+          : undefined,
+      }
     }
     throw new Error('Failed to create announcement');
   }
@@ -1007,10 +1045,10 @@ class Store {
   async markAnnouncementRead(id: string, userId: string) {
     const announcement = this.announcements.find(a => a.id === id);
     if (announcement && !announcement.readBy.includes(userId)) {
-      announcement.readBy.push(userId);
-      await this.syncToAPI(`announcements/${id}/read`, 'PUT', { userId });
+      announcement.readBy.push(userId)
+      await this.syncToAPI(`announcements/${id}/read`, "PUT", { userId })
       // Auto-refresh after CRUD operation
-      await this.refreshData();
+      await this.refreshData()
     }
   }
 
@@ -1146,10 +1184,10 @@ class Store {
     if (!response.ok) {
       throw new Error(`Failed to update permission status: ${response.status}`);
     }
-    const result = await response.json();
+    const result = await response.json()
     // Auto-refresh after CRUD operation
-    await this.refreshData();
-    return result;
+    await this.refreshData()
+    return result
   }
 
   // Late Approvals
@@ -1184,10 +1222,10 @@ class Store {
     if (!response.ok) {
       throw new Error(`Failed to update approval status: ${response.status}`);
     }
-    const result = await response.json();
+    const result = await response.json()
     // Auto-refresh after CRUD operation
-    await this.refreshData();
-    return result;
+    await this.refreshData()
+    return result
   }
 }
 
