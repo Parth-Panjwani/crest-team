@@ -37,7 +37,7 @@ This document summarizes the serverless API, MongoDB utilities, and client data 
   - Manual Rollup chunk splitting groups heavy vendor packages (`framer-motion`, `lucide-react`, `@radix-ui/*`, React Router, React Query) so no single bundle exceeds the 500 kB minified threshold.
   - The development proxy logs proxied requests for easier debugging when running the Express bridge locally.
 - Lazy-loaded page routes leverage `React.lazy` (see [`src/App.tsx`](../src/App.tsx)) to defer non-critical UI bundles until navigation.
-- `vercel.json` forces the Node.js 20 runtime for the API function to guarantee MongoDB and zlib compatibility.
+- `api/[...path].ts` exports a `config` object to pin the Node.js 20 runtime and max duration without relying on `vercel.json` overrides.
 
 ## Local Development Bridge
 

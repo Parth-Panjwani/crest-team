@@ -25,6 +25,11 @@ import type {
   UserDocument,
 } from './mongodb.js';
 
+export const config = {
+  runtime: 'nodejs20.x',
+  maxDuration: 30,
+} as const;
+
 type ApiMethod = NonNullable<VercelRequest['method']>;
 
 type ApiHandler = (

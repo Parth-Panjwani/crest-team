@@ -30,7 +30,7 @@ In Vercel dashboard → **Settings → General**:
 2. **Root Directory:** Leave empty (or `.` if needed)
 3. **Build Command:** `npm run build` (already in vercel.json)
 4. **Output Directory:** `dist` (already in vercel.json)
-5. **Serverless Runtime:** leave as default; `vercel.json` pins `api/[...path].ts` to Node.js 20 for MongoDB/zlib support
+5. **Serverless Runtime:** leave as default; the API function exports its own config to pin Node.js 20 for MongoDB/zlib support
 6. **Install Command:** `npm install` (default)
 
 ## Step 3: Build Configuration
@@ -115,7 +115,7 @@ After deployment:
 - Check build logs in Vercel dashboard
 - Ensure all dependencies are in `package.json`
 - Verify Node.js version (Vercel uses Node 18.x by default)
-- Confirm `vercel.json` still pins the API function to Node.js 20 so MongoDB/zlib remain available
+- Confirm `api/[...path].ts` still exports a `config` object with `runtime: 'nodejs20.x'` so MongoDB/zlib remain available
 - If chunk size warnings appear, adjust the manual vendor groupings in `vite.config.ts`
 
 ### Issue: "Environment variables not working"
@@ -134,12 +134,6 @@ After deployment:
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/[...path].ts": {
-      "runtime": "nodejs20.x",
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
