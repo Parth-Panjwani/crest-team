@@ -71,7 +71,7 @@ export default function Staff() {
     setStaff(allUsers);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     setFormData({ name: '', pin: '', role: 'employee', baseSalary: '', salaryChangeReason: '' });
     setSelectedStaff(null);
     setIsCreateDialogOpen(true);
@@ -94,7 +94,7 @@ export default function Staff() {
     setIsDeleteDialogOpen(true);
   };
 
-  const handleCreateSubmit = () => {
+  const handleCreateSubmit = async () => {
     if (!formData.name.trim() || !formData.pin.trim()) {
       toast({
         title: 'Validation Error',
@@ -128,7 +128,7 @@ export default function Staff() {
       ? parseFloat(formData.baseSalary) 
       : undefined;
     
-    store.createUser(formData.name, formData.role, formData.pin, baseSalary);
+    await store.createUser(formData.name, formData.role, formData.pin, baseSalary);
     toast({
       title: 'Staff Created',
       description: `${formData.name} has been added successfully`,
@@ -137,7 +137,7 @@ export default function Staff() {
     loadStaff();
   };
 
-  const handleEditSubmit = () => {
+  const handleEditSubmit = async () => {
     if (!selectedStaff) return;
 
     if (!formData.name.trim() || !formData.pin.trim()) {
@@ -181,7 +181,7 @@ export default function Staff() {
       ? formData.salaryChangeReason.trim() 
       : undefined;
     
-    store.updateUser(selectedStaff.id, {
+    await store.updateUser(selectedStaff.id, {
       name: formData.name,
       pin: formData.pin,
       role: formData.role,
@@ -199,7 +199,7 @@ export default function Staff() {
     loadStaff();
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!selectedStaff) return;
 
     if (selectedStaff.id === user?.id) {
@@ -212,13 +212,14 @@ export default function Staff() {
       return;
     }
 
-    const success = store.deleteUser(selectedStaff.id);
+    const success = await store.deleteUser(selectedStaff.id);
     if (success) {
       toast({
         title: 'Staff Deleted',
         description: `${selectedStaff.name} has been removed`,
         variant: 'destructive',
       });
+      setSelectedStaff(null);
       loadStaff();
     } else {
       toast({

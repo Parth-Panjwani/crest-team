@@ -47,7 +47,14 @@ db.exec(`
     status TEXT NOT NULL CHECK(status IN ('pending', 'done')),
     category TEXT NOT NULL CHECK(category IN ('order', 'general', 'reminder')),
     adminOnly INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (createdBy) REFERENCES users(id) ON DELETE CASCADE
+    completedBy TEXT,
+    completedAt TEXT,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    deletedAt TEXT,
+    deletedBy TEXT,
+    FOREIGN KEY (createdBy) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (completedBy) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (deletedBy) REFERENCES users(id) ON DELETE SET NULL
   );
 
   CREATE TABLE IF NOT EXISTS leaves (

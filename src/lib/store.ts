@@ -202,9 +202,38 @@ class Store {
     }
   }
 
+  // Check if we should use API (always use API for production, allow localStorage for local dev)
+  private shouldUseAPI(): boolean {
+    if (typeof window === 'undefined') return false;
+    // Always use API in production, or if MONGODB_URI is set
+    return import.meta.env.PROD || !!process.env.MONGODB_URI;
+  }
+
   // Auth
-  login(pin: string): User | null {
-    // Reload from storage to ensure we have the latest data
+  async login(pin: string): Promise<User | null> {
+    // Always try API first
+    if (this.shouldUseAPI()) {
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin }),
+        });
+        if (response.ok) {
+          const user = await response.json();
+          this.currentUser = user;
+          localStorage.setItem('current-user-id', user.id);
+          // Sync all data from API to localStorage for offline support
+          await this.syncAllFromAPI();
+          return user;
+        }
+      } catch (error) {
+        console.error('API login failed:', error);
+        throw error; // Don't fallback - API should always work in production
+      }
+    }
+    
+    // Fallback to localStorage (for local development only)
     this.loadFromStorage();
     const user = this.users.find(u => u.pin === pin);
     if (user) {
@@ -212,6 +241,62 @@ class Store {
       localStorage.setItem('current-user-id', user.id);
     }
     return user || null;
+  }
+
+  private async syncAllFromAPI() {
+    if (!this.shouldUseAPI()) return;
+    
+    try {
+      const [users, notes, leaves, salaries, attendance] = await Promise.all([
+        fetch('/api/users').then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch('/api/notes?deleted=false').then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch('/api/leaves').then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch('/api/salaries').then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch('/api/attendance/all').then(r => r.ok ? r.json() : []).catch(() => []),
+      ]);
+      
+      // Update local storage with API data (for offline support)
+      this.users = users.map((u: any) => ({ ...u }));
+      this.notes = notes.map((n: any) => ({
+        ...n,
+        createdAt: new Date(n.createdAt),
+        completedAt: n.completedAt ? new Date(n.completedAt) : undefined,
+        deletedAt: n.deletedAt ? new Date(n.deletedAt) : undefined,
+      }));
+      this.leaves = leaves.map((l: any) => ({ ...l }));
+      this.salaries = salaries.map((s: any) => ({
+        ...s,
+        advances: Array.isArray(s.advances) ? s.advances : [],
+        storePurchases: Array.isArray(s.storePurchases) ? s.storePurchases : [],
+      }));
+      this.attendance = attendance.map((a: any) => ({
+        ...a,
+        punches: Array.isArray(a.punches) ? a.punches : [],
+        totals: typeof a.totals === 'object' ? a.totals : { workMin: 0, breakMin: 0 },
+      }));
+      this.saveToStorage();
+    } catch (error) {
+      console.error('Failed to sync from API:', error);
+    }
+  }
+
+  private async syncToAPI(endpoint: string, method: string, data?: any): Promise<any> {
+    if (!this.shouldUseAPI()) return null;
+    
+    try {
+      const response = await fetch(`/api/${endpoint}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: data ? JSON.stringify(data) : undefined,
+      });
+      if (response.ok) {
+        return await response.json();
+      }
+      throw new Error(`API request failed: ${response.statusText}`);
+    } catch (error) {
+      console.error(`Failed to sync to API (${endpoint}):`, error);
+      throw error;
+    }
   }
 
   logout() {
@@ -237,7 +322,18 @@ class Store {
     return this.users.find(u => u.id === id) || null;
   }
 
-  createUser(name: string, role: Role, pin: string, baseSalary?: number): User {
+  async createUser(name: string, role: Role, pin: string, baseSalary?: number): Promise<User> {
+    if (this.shouldUseAPI()) {
+      const user = await this.syncToAPI('users', 'POST', { name, role, pin, baseSalary });
+      if (user) {
+        this.users.push(user);
+        this.saveToStorage();
+        return user;
+      }
+      throw new Error('Failed to create user');
+    }
+    
+    // Local fallback
     const user: User = {
       id: Date.now().toString(),
       name,
@@ -250,7 +346,7 @@ class Store {
     return user;
   }
 
-  updateUser(id: string, updates: Partial<Omit<User, 'id'>>, reason?: string): User | null {
+  async updateUser(id: string, updates: Partial<Omit<User, 'id'>>, reason?: string): Promise<User | null> {
     const user = this.users.find(u => u.id === id);
     if (user) {
       // Track salary changes
@@ -272,19 +368,33 @@ class Store {
       if (this.currentUser?.id === id) {
         this.currentUser = user;
       }
+      
+      // Sync to API
+      if (this.shouldUseAPI()) {
+        const updated = await this.syncToAPI(`users/${id}`, 'PUT', { ...user, ...updates });
+        if (updated) {
+          Object.assign(user, updated);
+        }
+      }
+      
       this.saveToStorage();
       return user;
     }
     return null;
   }
 
-  deleteUser(id: string): boolean {
+  async deleteUser(id: string): Promise<boolean> {
+    // Prevent deleting the current user
+    if (this.currentUser?.id === id) {
+      return false;
+    }
+    
+    if (this.shouldUseAPI()) {
+      await this.syncToAPI(`users/${id}`, 'DELETE');
+    }
+    
     const index = this.users.findIndex(u => u.id === id);
     if (index >= 0) {
-      // Prevent deleting the current user
-      if (this.currentUser?.id === id) {
-        return false;
-      }
       this.users.splice(index, 1);
       // Also clean up related data
       this.attendance = this.attendance.filter(a => a.userId !== id);
@@ -309,7 +419,7 @@ class Store {
     return this.attendance.find(a => a.userId === userId && a.date === today) || null;
   }
 
-  punch(userId: string, type: Punch['type']) {
+  async punch(userId: string, type: Punch['type']) {
     const today = new Date().toISOString().split('T')[0];
     
     // Check if user has an open attendance from a previous day
@@ -351,6 +461,12 @@ class Store {
 
     att.punches.push({ at: new Date(), type });
     this.calculateTotals(att);
+    
+    // Sync to API
+    if (this.shouldUseAPI()) {
+      await this.syncToAPI('attendance/punch', 'POST', { userId, type });
+    }
+    
     this.saveToStorage();
   }
 
@@ -397,7 +513,21 @@ class Store {
   }
 
   // Notes
-  addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false): Note {
+  async addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false): Promise<Note> {
+    if (this.shouldUseAPI()) {
+      const note = await this.syncToAPI('notes', 'POST', { text, createdBy: userId, category, adminOnly });
+      if (note) {
+        this.notes.push({
+          ...note,
+          createdAt: new Date(note.createdAt),
+        });
+        this.saveToStorage();
+        return note;
+      }
+      throw new Error('Failed to create note');
+    }
+    
+    // Local fallback
     const note: Note = {
       id: Date.now().toString(),
       text,
@@ -412,20 +542,32 @@ class Store {
     return note;
   }
 
-  updateNote(id: string, updates: Partial<Note>) {
+  async updateNote(id: string, updates: Partial<Note>) {
     const note = this.notes.find(n => n.id === id);
     if (note) {
       Object.assign(note, updates);
+      
+      // Sync to API
+      if (this.shouldUseAPI()) {
+        await this.syncToAPI(`notes/${id}`, 'PUT', updates);
+      }
+      
       this.saveToStorage();
     }
   }
 
-  deleteNote(id: string, deletedBy?: string) {
+  async deleteNote(id: string, deletedBy?: string) {
     const note = this.notes.find(n => n.id === id);
     if (note) {
       note.deleted = true;
       note.deletedAt = new Date();
       note.deletedBy = deletedBy;
+      
+      // Sync to API
+      if (this.shouldUseAPI()) {
+        await this.syncToAPI(`notes/${id}`, 'DELETE', { deletedBy });
+      }
+      
       this.saveToStorage();
     }
   }
@@ -479,7 +621,17 @@ class Store {
   }
 
   // Leave
-  applyLeave(userId: string, date: string, type: 'full' | 'half', reason: string): Leave {
+  async applyLeave(userId: string, date: string, type: 'full' | 'half', reason: string): Promise<Leave> {
+    if (this.shouldUseAPI()) {
+      const leave = await this.syncToAPI('leaves', 'POST', { userId, date, type, reason });
+      if (leave) {
+        this.leaves.push(leave);
+        this.saveToStorage();
+        return leave;
+      }
+      throw new Error('Failed to create leave');
+    }
+    
     const leave: Leave = {
       id: Date.now().toString(),
       userId,
@@ -493,10 +645,16 @@ class Store {
     return leave;
   }
 
-  updateLeaveStatus(id: string, status: 'approved' | 'rejected') {
+  async updateLeaveStatus(id: string, status: 'approved' | 'rejected') {
     const leave = this.leaves.find(l => l.id === id);
     if (leave) {
       leave.status = status;
+      
+      // Sync to API
+      if (this.shouldUseAPI()) {
+        await this.syncToAPI(`leaves/${id}`, 'PUT', { status });
+      }
+      
       this.saveToStorage();
     }
   }
@@ -516,7 +674,7 @@ class Store {
     return this.salaries.find(s => s.userId === userId && s.month === month) || null;
   }
 
-  updateSalary(salary: Salary) {
+  async updateSalary(salary: Salary) {
     // Calculate total deductions
     const advances = salary.advances || [];
     const storePurchases = salary.storePurchases || [];
@@ -524,15 +682,25 @@ class Store {
                            storePurchases.reduce((sum, p) => sum + (p.amount || 0), 0);
     
     // Calculate final pay (after deductions)
-    const finalPay = salary.calcPay + (salary.adjustments || 0) - totalDeductions;
+    const calcPay = salary.type === 'hourly' ? salary.base * salary.hours : salary.base;
+    const finalPay = calcPay + (salary.adjustments || 0) - totalDeductions;
     
     const updatedSalary: Salary = {
       ...salary,
+      calcPay,
       advances,
       storePurchases,
       totalDeductions,
       finalPay,
     };
+    
+    // Sync to API
+    if (this.shouldUseAPI()) {
+      const synced = await this.syncToAPI('salaries', 'POST', updatedSalary);
+      if (synced) {
+        Object.assign(updatedSalary, synced);
+      }
+    }
     
     const index = this.salaries.findIndex(s => s.id === salary.id);
     if (index >= 0) {
@@ -555,13 +723,26 @@ class Store {
     });
   }
 
-  deleteSalary(id: string) {
+  async deleteSalary(id: string) {
+    if (this.shouldUseAPI()) {
+      await this.syncToAPI(`salaries/${id}`, 'DELETE');
+    }
     this.salaries = this.salaries.filter(s => s.id !== id);
     this.saveToStorage();
   }
 
   // Pending Advances
-  addPendingAdvance(userId: string, date: string, amount: number, description: string): PendingAdvance {
+  async addPendingAdvance(userId: string, date: string, amount: number, description: string): Promise<PendingAdvance> {
+    if (this.shouldUseAPI()) {
+      const advance = await this.syncToAPI('pendingAdvances', 'POST', { userId, date, amount, description });
+      if (advance) {
+        this.pendingAdvances.push(advance);
+        this.saveToStorage();
+        return advance;
+      }
+      throw new Error('Failed to create advance');
+    }
+    
     const advance: PendingAdvance = {
       id: Date.now().toString(),
       userId,
@@ -584,22 +765,41 @@ class Store {
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  markAdvanceAsDeducted(advanceId: string, salaryId: string) {
+  async markAdvanceAsDeducted(advanceId: string, salaryId: string) {
     const advance = this.pendingAdvances.find(a => a.id === advanceId);
     if (advance) {
       advance.deducted = true;
       advance.deductedInSalaryId = salaryId;
+      
+      // Sync to API
+      if (this.shouldUseAPI()) {
+        await this.syncToAPI(`pendingAdvances/${advanceId}`, 'PUT', { salaryId });
+      }
+      
       this.saveToStorage();
     }
   }
 
-  deletePendingAdvance(id: string) {
+  async deletePendingAdvance(id: string) {
+    if (this.shouldUseAPI()) {
+      await this.syncToAPI(`pendingAdvances/${id}`, 'DELETE');
+    }
     this.pendingAdvances = this.pendingAdvances.filter(a => a.id !== id);
     this.saveToStorage();
   }
 
   // Pending Store Purchases
-  addPendingStorePurchase(userId: string, date: string, amount: number, description: string): PendingStorePurchase {
+  async addPendingStorePurchase(userId: string, date: string, amount: number, description: string): Promise<PendingStorePurchase> {
+    if (this.shouldUseAPI()) {
+      const purchase = await this.syncToAPI('pendingStorePurchases', 'POST', { userId, date, amount, description });
+      if (purchase) {
+        this.pendingStorePurchases.push(purchase);
+        this.saveToStorage();
+        return purchase;
+      }
+      throw new Error('Failed to create store purchase');
+    }
+    
     const purchase: PendingStorePurchase = {
       id: Date.now().toString(),
       userId,
@@ -622,16 +822,25 @@ class Store {
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  markStorePurchaseAsDeducted(purchaseId: string, salaryId: string) {
+  async markStorePurchaseAsDeducted(purchaseId: string, salaryId: string) {
     const purchase = this.pendingStorePurchases.find(p => p.id === purchaseId);
     if (purchase) {
       purchase.deducted = true;
       purchase.deductedInSalaryId = salaryId;
+      
+      // Sync to API
+      if (this.shouldUseAPI()) {
+        await this.syncToAPI(`pendingStorePurchases/${purchaseId}`, 'PUT', { salaryId });
+      }
+      
       this.saveToStorage();
     }
   }
 
-  deletePendingStorePurchase(id: string) {
+  async deletePendingStorePurchase(id: string) {
+    if (this.shouldUseAPI()) {
+      await this.syncToAPI(`pendingStorePurchases/${id}`, 'DELETE');
+    }
     this.pendingStorePurchases = this.pendingStorePurchases.filter(p => p.id !== id);
     this.saveToStorage();
   }
