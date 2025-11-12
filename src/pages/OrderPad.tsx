@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Check, Edit, Trash2, FileText } from 'lucide-react';
 import { Layout } from '@/components/Layout';
@@ -16,14 +16,14 @@ export default function OrderPad() {
   const [showEditor, setShowEditor] = useState(false);
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadNotes();
-  }, [filter]);
-
-  const loadNotes = () => {
+  const loadNotes = useCallback(() => {
     const allNotes = filter === 'all' ? store.getNotes() : store.getNotes(filter);
     setNotes(allNotes);
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    loadNotes();
+  }, [loadNotes]);
 
   const handleSave = () => {
     if (!noteText.trim()) return;
