@@ -127,17 +127,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (segments[0] === 'attendance') {
       const attendanceCollection = await getCollection('attendance');
       if (segments[1] === 'punch' && req.method === 'POST') {
-        const { userId, type } = req.body;
-        const today = new Date().toISOString().split('T')[0];
+        const { userId, type, manualPunch, punchedBy, reason, customTime } = req.body;
+        const punchDate = customTime ? new Date(customTime).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        const punchTime = customTime ? new Date(customTime) : new Date();
         
-        let attendance = await attendanceCollection.findOne({ userId, date: today });
+        // If manual punch, verify admin
+        if (manualPunch) {
+          const adminUser = await usersCollection.findOne({ id: punchedBy, role: 'admin' });
+          if (!adminUser) {
+            return res.status(403).json({ error: 'Only admins can perform manual punches' });
+          }
+        }
+        
+        let attendance = await attendanceCollection.findOne({ userId, date: punchDate });
         
         if (!attendance) {
           const id = uuidv4();
           attendance = {
             id,
             userId,
-            date: today,
+            date: punchDate,
             punches: [],
             totals: { workMin: 0, breakMin: 0 }
           };
@@ -145,7 +154,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         const punches = attendance.punches || [];
-        punches.push({ at: new Date().toISOString(), type });
+        const newPunch: any = { 
+          at: punchTime.toISOString(), 
+          type 
+        };
+        if (manualPunch) {
+          newPunch.manualPunch = true;
+          newPunch.punchedBy = punchedBy;
+          if (reason) newPunch.reason = reason;
+        }
+        punches.push(newPunch);
         const totals = calculateTotals(punches);
         
         await attendanceCollection.updateOne(
@@ -538,8 +556,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       name: error.name,
       code: error.code,
     });
+    
+    // Don't expose internal errors in production
+    const errorMessage = error.message || 'Internal server error';
+    const isMongoError = error.name?.includes('Mongo') || error.message?.includes('MongoDB');
+    
     return res.status(500).json({ 
-      error: error.message || 'Internal server error',
+      error: isMongoError 
+        ? 'Database connection error. Please check MongoDB configuration and network access.'
+        : errorMessage,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }

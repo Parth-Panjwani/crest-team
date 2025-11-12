@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 export default function Login() {
   const [pin, setPin] = useState("")
   const [remember, setRemember] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -26,7 +27,11 @@ export default function Login() {
   }, [])
 
   const handleLogin = useCallback(async () => {
+    if (isLoading || pin.length !== 4) return
+
+    setIsLoading(true)
     try {
+      console.log("Attempting login with PIN:", pin.replace(/\d/g, "*"))
       const user = await store.login(pin)
       if (user) {
         toast({
@@ -48,14 +53,31 @@ export default function Login() {
         error instanceof Error
           ? error.message
           : "Cannot connect to database. Please check your connection."
+
+      // More specific error messages
+      let userMessage = errorMessage
+      if (
+        errorMessage.includes("Failed to fetch") ||
+        errorMessage.includes("NetworkError") ||
+        errorMessage.includes("ERR_CONNECTION_REFUSED") ||
+        errorMessage.includes("Request timeout") ||
+        errorMessage.includes("API server not running")
+      ) {
+        userMessage =
+          "API server not running. Please run 'npm run dev:api' in another terminal."
+      }
+
       toast({
-        title: "Connection Error",
-        description: errorMessage,
+        title: "Login Failed",
+        description: userMessage,
         variant: "destructive",
+        duration: 5000,
       })
       setPin("")
+    } finally {
+      setIsLoading(false)
     }
-  }, [pin, navigate, toast])
+  }, [pin, navigate, toast, isLoading])
 
   // Handle keyboard input for desktop
   useEffect(() => {
@@ -90,15 +112,21 @@ export default function Login() {
               className="mb-6"
             >
               <div className="flex items-center justify-center mb-4">
-                <div className="flex items-center justify-center p-6 rounded-2xl bg-white border-2 border-border shadow-md w-full max-w-[240px] height-[120px] mx-auto">
+                <div className="flex items-center justify-center p-6 rounded-2xl bg-white border-2 border-border shadow-md w-full max-w-[240px] h-[180px] mx-auto">
                   <img
                     src="/logo.png"
                     alt="Company Logo"
-                    className="h-44 w-full object-cover"
-                    style={{ display: "block" }}
+                    className="h-full w-full object-contain"
                     onError={(e) => {
-                      console.error("Logo failed to load")
-                      ;(e.target as HTMLImageElement).style.display = "none"
+                      console.error("Logo failed to load from /logo.png")
+                      const img = e.target as HTMLImageElement
+                      img.style.display = "none"
+                      // Show placeholder text
+                      const parent = img.parentElement
+                      if (parent) {
+                        parent.innerHTML =
+                          '<span class="text-muted-foreground text-sm">Logo</span>'
+                      }
                     }}
                   />
                 </div>
@@ -191,10 +219,18 @@ export default function Login() {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={handleLogin}
-              disabled={pin.length < 4}
+              disabled={pin.length < 4 || isLoading}
               className="h-16 rounded-xl gradient-primary text-primary-foreground font-semibold flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg"
             >
-              <LogIn className="w-6 h-6" />
+              {isLoading ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="w-6 h-6 border-2 border-primary-foreground border-t-transparent rounded-full"
+                />
+              ) : (
+                <LogIn className="w-6 h-6" />
+              )}
             </motion.button>
           </motion.div>
         </div>

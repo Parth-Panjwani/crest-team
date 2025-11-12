@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer } from 'lucide-react';
+import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle } from 'lucide-react';
 import { Layout } from '@/components/Layout';
-import { store, Attendance as AttendanceType, User } from '@/lib/store';
+import { store, Attendance as AttendanceType, User, STORE_TIMINGS } from '@/lib/store';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -17,6 +20,14 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Attendance() {
@@ -63,20 +74,27 @@ export default function Attendance() {
     const checkIn = att.punches.find(p => p.type === 'IN');
     const checkOut = att.punches.find(p => p.type === 'OUT');
     
-    // Process breaks to get pairs of start/end
-    const breakPairs: Array<{ start: Date; end: Date; duration: number }> = [];
-    let currentBreakStart: Date | null = null;
+    // Process breaks to get pairs of start/end with manual punch info
+    const breakPairs: Array<{ start: Date; end: Date; duration: number; manualStart?: boolean; manualEnd?: boolean; reason?: string }> = [];
+    let currentBreakStart: { date: Date; manual?: boolean; reason?: string } | null = null;
     
     for (const punch of att.punches) {
       if (punch.type === 'BREAK_START') {
-        currentBreakStart = new Date(punch.at);
+        currentBreakStart = { 
+          date: new Date(punch.at),
+          manual: punch.manualPunch,
+          reason: punch.reason
+        };
       } else if (punch.type === 'BREAK_END' && currentBreakStart) {
         const breakEnd = new Date(punch.at);
-        const duration = Math.round((breakEnd.getTime() - currentBreakStart.getTime()) / 60000);
+        const duration = Math.round((breakEnd.getTime() - currentBreakStart.date.getTime()) / 60000);
         breakPairs.push({
-          start: currentBreakStart,
+          start: currentBreakStart.date,
           end: breakEnd,
-          duration
+          duration,
+          manualStart: currentBreakStart.manual,
+          manualEnd: punch.manualPunch,
+          reason: currentBreakStart.reason || punch.reason
         });
         currentBreakStart = null;
       }
@@ -186,7 +204,14 @@ export default function Attendance() {
                 {breakPairs.map((breakPair, index) => (
                   <div key={index} className="glass-card rounded-xl p-3 border border-glass-border">
                     <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs font-semibold text-warning">Break {index + 1}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold text-warning">Break {index + 1}</p>
+                        {(breakPair.manualStart || breakPair.manualEnd) && (
+                          <span className="px-1.5 py-0.5 rounded bg-warning/20 text-warning text-[10px] border border-warning/30">
+                            Manual
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs font-bold">{breakPair.duration}m</p>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -194,6 +219,9 @@ export default function Attendance() {
                       <span>→</span>
                       <span>{formatTime(breakPair.end)}</span>
                     </div>
+                    {breakPair.reason && (
+                      <p className="text-xs text-muted-foreground italic mt-1">Reason: {breakPair.reason}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -228,6 +256,49 @@ export default function Attendance() {
       ? 'on-break'
       : 'checked-in'
     : 'not-checked-in';
+
+  // Manual punch dialog state
+  const [isManualPunchDialogOpen, setIsManualPunchDialogOpen] = useState(false);
+  const [selectedEmployeeForPunch, setSelectedEmployeeForPunch] = useState<User | null>(null);
+  const [manualPunchType, setManualPunchType] = useState<'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END'>('IN');
+  const [manualPunchTime, setManualPunchTime] = useState(() => {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0].slice(0, 5);
+    return { date: dateStr, time: timeStr };
+  });
+  const [manualPunchReason, setManualPunchReason] = useState('');
+
+  const handleManualPunch = async () => {
+    if (!selectedEmployeeForPunch || !user) return;
+    
+    const [hours, minutes] = manualPunchTime.time.split(':').map(Number);
+    const punchDateTime = new Date(`${manualPunchTime.date}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`);
+    
+    try {
+      await store.punch(selectedEmployeeForPunch.id, manualPunchType, {
+        manualPunch: true,
+        punchedBy: user.id,
+        reason: manualPunchReason || undefined,
+        customTime: punchDateTime
+      });
+      
+      toast({
+        title: 'Manual Punch Recorded',
+        description: `${manualPunchType} recorded for ${selectedEmployeeForPunch.name}`,
+      });
+      
+      setIsManualPunchDialogOpen(false);
+      setSelectedEmployeeForPunch(null);
+      setManualPunchReason('');
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to record manual punch',
+        variant: 'destructive',
+      });
+    }
+  };
 
   // Admin view with tabs
   if (isAdmin) {
@@ -585,6 +656,119 @@ export default function Attendance() {
                 </div>
               </TabsContent>
             </Tabs>
+
+            {/* Manual Punch Dialog */}
+            <Dialog open={isManualPunchDialogOpen} onOpenChange={setIsManualPunchDialogOpen}>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Manual Punch</DialogTitle>
+                  <DialogDescription>
+                    Record a manual punch for an employee
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div>
+                    <Label>Employee</Label>
+                    <Select
+                      value={selectedEmployeeForPunch?.id || ''}
+                      onValueChange={(value) => {
+                        const emp = allEmployees.find(e => e.id === value);
+                        setSelectedEmployeeForPunch(emp || null);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select employee" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allEmployees.map((emp) => (
+                          <SelectItem key={emp.id} value={emp.id}>
+                            {emp.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Punch Type</Label>
+                    <Select
+                      value={manualPunchType}
+                      onValueChange={(value) => setManualPunchType(value as 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END')}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="IN">Check In</SelectItem>
+                        <SelectItem value="OUT">Check Out</SelectItem>
+                        <SelectItem value="BREAK_START">Break Start</SelectItem>
+                        <SelectItem value="BREAK_END">Break End</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Date</Label>
+                      <Input
+                        type="date"
+                        value={manualPunchTime.date}
+                        onChange={(e) => setManualPunchTime({ ...manualPunchTime, date: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <Label>Time</Label>
+                      <Input
+                        type="time"
+                        value={manualPunchTime.time}
+                        onChange={(e) => setManualPunchTime({ ...manualPunchTime, time: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label>Reason (Optional)</Label>
+                    <Textarea
+                      placeholder="e.g., Employee forgot to punch, arrived on time"
+                      value={manualPunchReason}
+                      onChange={(e) => setManualPunchReason(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+
+                  {/* Store Timings Info */}
+                  <div className="glass-card rounded-xl p-4 border border-glass-border">
+                    <p className="text-xs font-semibold mb-2 text-muted-foreground">Store Timings</p>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Morning:</span>
+                        <span className="font-medium">{STORE_TIMINGS.morningStart} - {STORE_TIMINGS.morningEnd}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Lunch:</span>
+                        <span className="font-medium">{STORE_TIMINGS.lunchStart} - {STORE_TIMINGS.lunchEnd}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Evening:</span>
+                        <span className="font-medium">{STORE_TIMINGS.eveningStart} - {STORE_TIMINGS.eveningEnd}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsManualPunchDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleManualPunch}
+                    disabled={!selectedEmployeeForPunch}
+                    className="gradient-primary"
+                  >
+                    Record Punch
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </motion.div>
         </div>
       </Layout>

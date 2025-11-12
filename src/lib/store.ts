@@ -1,17 +1,28 @@
 // Type definitions for app data
 export type Role = 'admin' | 'employee';
 
+export interface CustomBreakTime {
+  id: string;
+  startTime: string; // HH:mm format
+  endTime: string; // HH:mm format
+  reason?: string; // e.g., "Side gig", "Personal break"
+}
+
 export interface User {
   id: string;
   name: string;
   role: Role;
   pin: string;
   baseSalary?: number;
+  customBreakTimes?: CustomBreakTime[]; // Custom break times for this employee
 }
 
 export interface Punch {
   at: Date;
   type: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END';
+  manualPunch?: boolean; // true if punched by admin
+  punchedBy?: string; // admin user ID who did the manual punch
+  reason?: string; // reason for manual punch
 }
 
 export interface Attendance {
@@ -121,6 +132,16 @@ export interface Announcement {
   expiresAt?: Date;
   readBy: string[];
 }
+
+// Store timing configuration
+export const STORE_TIMINGS = {
+  morningStart: '09:30', // 9:30 AM
+  morningEnd: '13:40',   // 1:40 PM
+  lunchStart: '13:40',   // 1:40 PM
+  lunchEnd: '15:30',     // 3:30 PM
+  eveningStart: '15:30', // 3:30 PM
+  eveningEnd: '21:30',   // 9:30 PM
+};
 
 // MongoDB-driven store - all data comes from MongoDB
 class Store {
@@ -289,38 +310,58 @@ class Store {
 
   // Auth - ALWAYS uses MongoDB, no localStorage fallback
   async login(pin: string): Promise<User | null> {
+    const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
     try {
-      // Ensure we have fresh data from MongoDB
-      await this.refreshData();
+      console.log('Making login request to:', `${apiBase}/api/auth/login`);
       
-      // Try login via API (MongoDB)
-      const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
+      // Try login via API (MongoDB) - don't refresh all data first, just login
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),
+        signal: controller.signal,
       });
       
-      if (response.ok) {
-        const user = await response.json();
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          console.log('Invalid PIN - 401 response');
+          return null; // Invalid PIN
+        }
+        const errorText = await response.text();
+        console.error('Login failed:', response.status, errorText);
+        throw new Error(`Login failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+      }
+      
+      const user = await response.json();
+      console.log('Login successful:', user.name);
       this.currentUser = user;
-        // Only store user ID in localStorage for session management
+      
+      // Store user ID in localStorage for session management
       localStorage.setItem('current-user-id', user.id);
-        // Refresh all data from MongoDB after login
-        await this.refreshData();
-        return user;
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Invalid PIN' }));
-        console.error('Login failed:', errorData.error);
-        return null;
-      }
+      
+      // Refresh all data from MongoDB after login (don't await - do it in background)
+      this.refreshData().catch(err => console.error('Background data refresh failed:', err));
+      
+      return user;
     } catch (error: any) {
+      clearTimeout(timeoutId);
       console.error('API login failed:', error);
-      // In local dev, if API is not available, show helpful error
-      if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
-        console.error('⚠️ MongoDB API not available. Make sure you are running on Vercel or have API proxy configured.');
-        throw new Error('Cannot connect to database. Please check your connection.');
+      
+      // Handle timeout
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout - API server may not be running. Please run "npm run dev:api" in another terminal.');
       }
+      
+      // In local dev, if API is not available, show helpful error
+      if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError') || error.message?.includes('ERR_CONNECTION_REFUSED')) {
+        throw new Error('API server not running. Please run "npm run dev:api" in another terminal.');
+      }
+      
       throw error;
     }
   }
@@ -418,36 +459,46 @@ class Store {
     return this.attendance.find(a => a.userId === userId && a.date === today) || null;
   }
 
-  async punch(userId: string, type: Punch['type']) {
-    const today = new Date().toISOString().split('T')[0];
+  async punch(userId: string, type: Punch['type'], options?: { manualPunch?: boolean; punchedBy?: string; reason?: string; customTime?: Date }) {
+    const punchTime = options?.customTime || new Date();
+    const punchDate = punchTime.toISOString().split('T')[0];
     
-    // Check if user has an open attendance from a previous day
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-    
-    await this.ensureDataLoaded();
-    const yesterdayAtt = this.attendance.find(a => 
-      a.userId === userId && 
-      a.date === yesterdayStr &&
-      a.punches.length > 0 &&
-      a.punches[a.punches.length - 1].type !== 'OUT'
-    );
-    
-    // If user was checked in from yesterday and checking in today, auto-checkout yesterday
-    if (yesterdayAtt && type === 'IN') {
-      const lastPunch = yesterdayAtt.punches[yesterdayAtt.punches.length - 1];
-      if (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END') {
-        const midnight = new Date(yesterdayStr);
-        midnight.setHours(23, 59, 59, 999);
-        yesterdayAtt.punches.push({ at: midnight, type: 'OUT' });
-        this.calculateTotals(yesterdayAtt);
-        await this.syncToAPI('attendance/punch', 'POST', { userId, type: 'OUT', date: yesterdayStr });
+    // Check if user has an open attendance from a previous day (only for regular punches, not manual with custom time)
+    if (!options?.customTime) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      
+      await this.ensureDataLoaded();
+      const yesterdayAtt = this.attendance.find(a => 
+        a.userId === userId && 
+        a.date === yesterdayStr &&
+        a.punches.length > 0 &&
+        a.punches[a.punches.length - 1].type !== 'OUT'
+      );
+      
+      // If user was checked in from yesterday and checking in today, auto-checkout yesterday
+      if (yesterdayAtt && type === 'IN') {
+        const lastPunch = yesterdayAtt.punches[yesterdayAtt.punches.length - 1];
+        if (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END') {
+          const midnight = new Date(yesterdayStr);
+          midnight.setHours(23, 59, 59, 999);
+          yesterdayAtt.punches.push({ at: midnight, type: 'OUT' });
+          this.calculateTotals(yesterdayAtt);
+          await this.syncToAPI('attendance/punch', 'POST', { userId, type: 'OUT', date: yesterdayStr });
+        }
       }
     }
     
     // Sync punch to MongoDB
-    const result = await this.syncToAPI('attendance/punch', 'POST', { userId, type });
+    const result = await this.syncToAPI('attendance/punch', 'POST', { 
+      userId, 
+      type,
+      manualPunch: options?.manualPunch || false,
+      punchedBy: options?.punchedBy,
+      reason: options?.reason,
+      customTime: options?.customTime?.toISOString()
+    });
     await this.refreshData();
     return result;
   }

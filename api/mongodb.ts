@@ -18,7 +18,18 @@ export async function connectToDatabase(): Promise<Db> {
     console.log('URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@')); // Hide password
     console.log('Database:', DB_NAME);
     
-    client = new MongoClient(MONGODB_URI);
+    // Add connection options for better SSL/TLS handling
+    const clientOptions = {
+      serverSelectionTimeoutMS: 10000, // 10 second timeout
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
+      tls: true,
+      tlsAllowInvalidCertificates: false,
+      retryWrites: true,
+      retryReads: true,
+    };
+    
+    client = new MongoClient(MONGODB_URI, clientOptions);
     await client.connect();
     console.log('✅ MongoDB connected successfully');
     
@@ -38,11 +49,19 @@ export async function connectToDatabase(): Promise<Db> {
     console.error('❌ Failed to connect to MongoDB:', error.message);
     console.error('Error code:', error.code);
     console.error('Error name:', error.name);
+    
+    // More specific error handling
     if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
       throw new Error('Cannot connect to MongoDB server. Check your connection string and network access.');
     }
     if (error.code === 8000 || error.message?.includes('authentication')) {
       throw new Error('MongoDB authentication failed. Check your credentials.');
+    }
+    if (error.message?.includes('SSL') || error.message?.includes('TLS') || error.code === 'ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR') {
+      throw new Error('MongoDB SSL connection failed. Check: 1) Your IP is whitelisted in MongoDB Atlas, 2) Network firewall allows MongoDB connections, 3) Try again in a few moments.');
+    }
+    if (error.message?.includes('ReplicaSetNoPrimary')) {
+      throw new Error('MongoDB replica set issue. The cluster may be initializing. Please try again in a few moments.');
     }
     throw error;
   }
