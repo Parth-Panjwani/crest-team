@@ -18,12 +18,14 @@ import type {
   AttendancePunchType,
   LeaveDocument,
   NoteDocument,
+  NotificationDocument,
   PendingAdvanceDocument,
   PendingStorePurchaseDocument,
   SalaryDocument,
   SalaryHistoryDocument,
   UserDocument,
 } from './mongodb.js';
+import admin from 'firebase-admin';
 
 type ApiMethod = NonNullable<VercelRequest['method']>;
 
@@ -138,6 +140,106 @@ async function ensureAdmin(userId: string): Promise<boolean> {
   const usersCollection = await getCollection<UserDocument>('users');
   const user = await usersCollection.findOne({ id: userId });
   return user?.role === 'admin';
+}
+
+// Initialize Firebase Admin SDK
+let firebaseAdmin: admin.app.App | null = null;
+
+function initializeFirebase(): void {
+  if (firebaseAdmin) {
+    return;
+  }
+
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+
+  if (!projectId || !privateKey || !clientEmail) {
+    console.warn('⚠️  Firebase credentials not configured. Push notifications will be disabled.');
+    return;
+  }
+
+  try {
+    firebaseAdmin = admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId,
+        privateKey,
+        clientEmail,
+      }),
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize Firebase Admin SDK:', error);
+  }
+}
+
+// Send push notification to a user
+async function sendPushNotification(
+  userId: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<void> {
+  if (!firebaseAdmin) {
+    initializeFirebase();
+    if (!firebaseAdmin) {
+      return;
+    }
+  }
+
+  try {
+    const usersCollection = await getCollection<UserDocument>('users');
+    const user = await usersCollection.findOne({ id: userId });
+
+    if (!user || !(user as any).fcmToken) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`ℹ️  No FCM token found for user ${userId} - push notifications disabled`);
+      }
+      return;
+    }
+
+    const message: admin.messaging.Message = {
+      token: (user as any).fcmToken,
+      notification: { title, body },
+      data: data ? Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])) : undefined,
+      webpush: {
+        notification: { title, body, icon: '/logo.png', badge: '/logo.png' },
+        fcmOptions: { link: '/dashboard' },
+      },
+    };
+
+    await firebaseAdmin.messaging().send(message);
+  } catch (error) {
+    console.error(`❌ Failed to send push notification to user ${userId}:`, error);
+  }
+}
+
+// Send push notification and create in-app notification
+async function sendPushNotificationToUser(
+  userId: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+  notificationType: 'punch' | 'leave' | 'note' | 'salary' | 'announcement' | 'chat' = 'note'
+): Promise<void> {
+  try {
+    await sendPushNotification(userId, title, body, data);
+
+    const notificationsCollection = await getCollection<NotificationDocument>('notifications');
+    const notification: NotificationDocument = {
+      id: uuidv4(),
+      type: notificationType,
+      title,
+      message: body,
+      targetUserId: userId,
+      read: false,
+      createdAt: new Date().toISOString(),
+      data: data || {},
+    };
+
+    await notificationsCollection.insertOne(notification);
+  } catch (error) {
+    console.error('Failed to send notification:', error);
+  }
 }
 
 const handleHealth: ApiHandler = (_, res, context) => {
@@ -332,6 +434,73 @@ const handleAttendance: ApiHandler = async (req, res, context) => {
 
     await attendanceCollection.updateOne({ id: attendance.id }, { $set: { punches, totals } });
     const updated = await attendanceCollection.findOne({ id: attendance.id });
+    
+    // Send push notifications to admins for attendance actions (except manual punches by admin)
+    if ((type === 'IN' || type === 'OUT' || type === 'BREAK_START' || type === 'BREAK_END') && !manualPunch) {
+      try {
+        const usersCollection = await getCollection<UserDocument>('users');
+        const user = await usersCollection.findOne({ id: userId });
+        const admins = await usersCollection.find({ role: 'admin' }).toArray();
+        
+        if (user && admins.length > 0) {
+          const notificationsCollection = await getCollection<NotificationDocument>('notifications');
+          let title = '';
+          let message = '';
+          
+          if (type === 'IN') {
+            title = `${user.name} checked in`;
+            message = `${user.name} checked in at ${punchTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+          } else if (type === 'OUT') {
+            title = `${user.name} checked out`;
+            message = `${user.name} checked out at ${punchTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+          } else if (type === 'BREAK_START') {
+            title = `☕ ${user.name} started break`;
+            message = `${user.name} started break at ${punchTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}${reason ? ` - Reason: ${reason}` : ''}`;
+          } else if (type === 'BREAK_END') {
+            title = `✅ ${user.name} ended break`;
+            message = `${user.name} ended break at ${punchTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+          }
+          
+          // Create in-app notifications for all admins
+          const notificationPromises = admins.map(admin => {
+            const notification: NotificationDocument = {
+              id: uuidv4(),
+              type: 'punch',
+              title,
+              message,
+              userId,
+              targetUserId: admin.id,
+              read: false,
+              createdAt: new Date().toISOString(),
+              data: {
+                attendanceId: attendance.id,
+                punchType: type,
+                punchTime: punchTime.toISOString(),
+                reason: reason || '',
+              },
+            };
+            return notificationsCollection.insertOne(notification);
+          });
+          await Promise.all(notificationPromises);
+          
+          // Send push notifications to all admins
+          for (const admin of admins) {
+            await sendPushNotificationToUser(admin.id, title, message, {
+              type: 'punch',
+              attendanceId: attendance.id,
+              punchType: type,
+              userId,
+            }, 'punch').catch(err => {
+              console.error('Failed to send push notification:', err);
+            });
+          }
+        }
+      } catch (notifError) {
+        console.error('Failed to create notification:', notifError);
+        // Don't fail the punch if notification fails
+      }
+    }
+    
     return json(res, 200, formatAttendance(updated));
   }
 
@@ -952,6 +1121,57 @@ const handleAnnouncements: ApiHandler = async (req, res, context) => {
   return methodNotAllowed(res, context.method, ['GET', 'POST', 'PUT']);
 };
 
+const handleFCM: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'fcm' || context.segments[1] !== 'token') {
+    return false;
+  }
+
+  if (context.method === 'POST') {
+    const body = getRequestBody(req);
+    const userId = getString(body.userId);
+    const token = getString(body.token);
+
+    if (!userId || !token) {
+      return json(res, 400, { error: 'userId and token are required' });
+    }
+
+    try {
+      const usersCollection = await getCollection<UserDocument>('users');
+      await usersCollection.updateOne(
+        { id: userId },
+        { $set: { fcmToken: token } }
+      );
+      return json(res, 200, { success: true, message: 'FCM token saved' });
+    } catch (error) {
+      console.error('Save FCM token error:', error);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  }
+
+  if (context.method === 'DELETE') {
+    const body = getRequestBody(req);
+    const userId = getString(body.userId);
+
+    if (!userId) {
+      return json(res, 400, { error: 'userId is required' });
+    }
+
+    try {
+      const usersCollection = await getCollection<UserDocument>('users');
+      await usersCollection.updateOne(
+        { id: userId },
+        { $unset: { fcmToken: '' } }
+      );
+      return json(res, 200, { success: true, message: 'FCM token removed' });
+    } catch (error) {
+      console.error('Remove FCM token error:', error);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  }
+
+  return methodNotAllowed(res, context.method, ['POST', 'DELETE']);
+};
+
 const routeHandlers: ApiHandler[] = [
   handleAuth,
   handleUsers,
@@ -964,6 +1184,7 @@ const routeHandlers: ApiHandler[] = [
   handlePendingAdvances,
   handlePendingStorePurchases,
   handleAnnouncements,
+  handleFCM,
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

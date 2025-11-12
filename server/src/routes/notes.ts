@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getCollection } from '../models/index.js';
 import { formatNote, compressNoteText, type NoteDocument } from '../models/notes.js';
 import { broadcastNoteUpdate } from '../websocket/broadcast.js';
+import { sendPushNotificationToUser } from '../services/notifications.js';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ router.get('/', async (req, res) => {
 // Create note
 router.post('/', async (req, res) => {
   try {
-    const { text, createdBy, category, adminOnly } = req.body;
+    const { text, createdBy, category, adminOnly, subCategory, imageUrl } = req.body;
     if (!text || !createdBy) {
       return res.status(400).json({ error: 'text and createdBy are required' });
     }
@@ -42,11 +43,41 @@ router.post('/', async (req, res) => {
       createdAt: now,
       status: 'pending',
       category: category || 'general',
+      subCategory: category === 'reminder' ? subCategory : undefined,
       adminOnly: adminOnly || false,
+      imageUrl: imageUrl || undefined,
     };
     const notesCollection = await getCollection<NoteDocument>('notes');
     await notesCollection.insertOne(note);
     const formatted = formatNote(note);
+    
+    // Notify all users about new note
+    try {
+      const usersCollection = await getCollection('users');
+      const creator = await usersCollection.findOne({ id: createdBy });
+      const allUsers = await usersCollection.find({}).toArray();
+      
+      if (creator) {
+        const notificationTitle = `📝 New ${category === 'reminder' ? 'Reminder' : category === 'order' ? 'Order' : 'Note'}`;
+        const notificationBody = `${creator.name} created a new ${category === 'reminder' ? 'reminder' : category === 'order' ? 'order' : 'note'}`;
+        
+        // Send push notification to all users (except creator)
+        allUsers.forEach(user => {
+          if (user.id !== createdBy) {
+            sendPushNotificationToUser(user.id, notificationTitle, notificationBody, {
+              type: 'note',
+              noteId: formatted.id,
+              category: category || 'general',
+            }, 'note').catch(err => {
+              console.error('Failed to send push notification:', err);
+            });
+          }
+        });
+      }
+    } catch (notifError) {
+      console.error('Failed to send note notifications:', notifError);
+    }
+    
     // Broadcast to all users
     broadcastNoteUpdate(formatted);
     res.json(formatted);
@@ -60,12 +91,22 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { text, status, category, adminOnly } = req.body;
+    const { text, status, category, adminOnly, subCategory, imageUrl } = req.body;
     const notesCollection = await getCollection<NoteDocument>('notes');
     const update: Partial<NoteDocument> = {};
     if (status !== undefined) update.status = status;
-    if (category !== undefined) update.category = category;
+    if (category !== undefined) {
+      update.category = category;
+      if (category === 'reminder') {
+        update.subCategory = subCategory;
+      } else {
+        update.subCategory = undefined;
+      }
+    } else if (subCategory !== undefined) {
+      update.subCategory = subCategory;
+    }
     if (adminOnly !== undefined) update.adminOnly = adminOnly;
+    if (imageUrl !== undefined) update.imageUrl = imageUrl;
     if (text !== undefined) {
       const { textCompressed, textLength, textHash } = compressNoteText(text);
       update.textCompressed = textCompressed;

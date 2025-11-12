@@ -13,6 +13,7 @@ export interface NoteDocument {
   createdAt: string;
   status: string;
   category?: string;
+  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock';
   adminOnly?: boolean;
   completedBy?: string;
   completedAt?: string;
@@ -20,6 +21,7 @@ export interface NoteDocument {
   deleted?: boolean;
   deletedAt?: string | null;
   deletedBy?: string | null;
+  imageUrl?: string;
 }
 
 export interface NoteResponse {
@@ -29,12 +31,14 @@ export interface NoteResponse {
   createdAt: string;
   status: string;
   category: string;
+  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock';
   adminOnly: boolean;
   completedBy?: string;
   completedAt?: string;
   deleted: boolean;
   deletedAt?: string | null;
   deletedBy?: string | null;
+  imageUrl?: string;
 }
 
 function isBinary(value: unknown): value is Binary | Buffer {
@@ -73,12 +77,14 @@ export function formatNote(doc: NoteDocument): NoteResponse {
     createdAt: doc.createdAt,
     status: doc.status,
     category: doc.category || 'general',
+    subCategory: doc.subCategory,
     adminOnly: doc.adminOnly || false,
     completedBy: doc.completedBy,
     completedAt: doc.completedAt,
     deleted: doc.deleted || false,
     deletedAt: doc.deletedAt,
     deletedBy: doc.deletedBy,
+    imageUrl: doc.imageUrl,
   };
 }
 

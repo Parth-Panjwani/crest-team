@@ -6,6 +6,7 @@ import { broadcastLeaveUpdate } from '../websocket/broadcast.js';
 import type { SalaryDocument } from '../models/salaries.js';
 import type { NotificationDocument } from '../models/notifications.js';
 import { broadcastDataUpdate } from '../websocket/broadcast.js';
+import { sendPushNotificationToUser } from '../services/notifications.js';
 
 const router = Router();
 
@@ -77,6 +78,17 @@ router.post('/', async (req, res) => {
             title: '📅 New Leave Request',
             message: `${user.name} requested leave`,
           }, admin.id);
+          
+          // Send push notification
+          sendPushNotificationToUser(admin.id, '📅 New Leave Request', 
+            `${user.name} requested ${type === 'full' ? 'full day' : 'half day'} leave on ${new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, 
+            {
+              type: 'leave',
+              leaveId: leave.id,
+              userId,
+            }, 'leave').catch(err => {
+              console.error('Failed to send push notification:', err);
+            });
         });
       }
     } catch (notifError) {
@@ -204,6 +216,17 @@ router.put('/:id', async (req, res) => {
               title: 'Salary Deduction for Leave',
               message: `₹${deductionAmount.toFixed(2)} deducted for leave`,
             }, updated.userId);
+            
+            // Send push notification
+            sendPushNotificationToUser(updated.userId, 'Salary Deduction for Leave',
+              `₹${deductionAmount.toFixed(2)} has been deducted from your salary for ${updated.type === 'full' ? 'full day' : 'half day'} leave`,
+              {
+                type: 'salary',
+                leaveId: updated.id,
+                amount: deductionAmount.toString(),
+              }, 'salary').catch(err => {
+                console.error('Failed to send push notification:', err);
+              });
           }
         } catch (salaryError) {
           console.error('Failed to update salary for leave deduction:', salaryError);
@@ -211,6 +234,33 @@ router.put('/:id', async (req, res) => {
         }
       }
 
+      // Notify employee about leave status update
+      if (status === 'approved' || status === 'rejected') {
+        try {
+          const usersCollection = await getCollection('users');
+          const employee = await usersCollection.findOne({ id: updated.userId });
+          
+          if (employee) {
+            const statusMessage = status === 'approved' 
+              ? `Your leave request for ${new Date(updated.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} has been approved`
+              : `Your leave request for ${new Date(updated.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} has been rejected`;
+            
+            sendPushNotificationToUser(updated.userId, 
+              status === 'approved' ? '✅ Leave Approved' : '❌ Leave Rejected',
+              statusMessage,
+              {
+                type: 'leave',
+                leaveId: updated.id,
+                status,
+              }, 'leave').catch(err => {
+                console.error('Failed to send push notification:', err);
+              });
+          }
+        } catch (notifError) {
+          console.error('Failed to send leave status notification:', notifError);
+        }
+      }
+      
       const formatted = formatLeave(updated);
       // Broadcast to all users
       broadcastLeaveUpdate(formatted);

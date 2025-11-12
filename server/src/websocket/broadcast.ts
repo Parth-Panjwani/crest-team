@@ -38,3 +38,10 @@ export function broadcastAnnouncementUpdate(announcement: unknown) {
   broadcastDataUpdate('announcement', announcement);
 }
 
+export function broadcastChatMessage(userId: string, message: unknown) {
+  broadcastToUser(userId, {
+    type: 'chat-message',
+    payload: message,
+  });
+}
+

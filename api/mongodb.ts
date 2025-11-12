@@ -133,12 +133,26 @@ export interface AnnouncementDocument {
   readBy?: string[];
 }
 
+export interface NotificationDocument {
+  _id?: ObjectId;
+  id: string;
+  type: 'punch' | 'leave' | 'note' | 'salary' | 'announcement' | 'chat';
+  title: string;
+  message: string;
+  userId?: string;
+  targetUserId?: string;
+  read: boolean;
+  createdAt: string;
+  data?: Record<string, unknown>;
+}
+
 export interface FormattedUser {
   id: string;
   name: string;
   role: Role;
   pin: string;
   baseSalary?: number | null;
+  fcmToken?: string;
 }
 
 export interface FormattedAttendance {
@@ -490,6 +504,7 @@ export function formatUser(doc: UserDocument | WithId<UserDocument>): FormattedU
     role: doc.role,
     pin: doc.pin,
     baseSalary: doc.baseSalary ?? undefined,
+    fcmToken: (doc as any).fcmToken ?? undefined,
   };
 }
 

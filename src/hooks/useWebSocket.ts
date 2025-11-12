@@ -71,7 +71,11 @@ export function useWebSocket(
               return;
             }
             
-            if (message.type === 'data-update') {
+            if (message.type === 'chat-message') {
+              // Chat messages are sent directly, not wrapped in data-update
+              console.log('📡 Chat message received');
+              onDataUpdate('chat-message', message.payload);
+            } else if (message.type === 'data-update') {
               const payload = message.payload as DataUpdatePayload;
               console.log('📡 Data update received:', payload.dataType);
               onDataUpdate(payload.dataType, payload.data);

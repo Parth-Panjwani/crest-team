@@ -13,6 +13,9 @@ import notificationRoutes from './notifications.js';
 import latePermissionRoutes from './latePermissions.js';
 import lateApprovalRoutes from './lateApprovals.js';
 import bootstrapRoutes from './bootstrap.js';
+import fileRoutes from './files.js';
+import chatRoutes from './chats.js';
+import fcmRoutes from './fcm.js';
 
 export function setupRoutes(app: Express) {
   app.use('/api/auth', authRoutes);
@@ -29,5 +32,8 @@ export function setupRoutes(app: Express) {
   app.use('/api/latePermissions', latePermissionRoutes);
   app.use('/api/lateApprovals', lateApprovalRoutes);
   app.use('/api/bootstrap', bootstrapRoutes);
+  app.use('/api/files', fileRoutes);
+  app.use('/api/chats', chatRoutes);
+  app.use('/api/fcm', fcmRoutes);
 }
 

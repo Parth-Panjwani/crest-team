@@ -8,6 +8,7 @@ import type { NotificationDocument } from '../models/notifications.js';
 import { broadcastDataUpdate } from '../websocket/broadcast.js';
 import type { LateApprovalDocument } from '../models/lateApprovals.js';
 import type { LatePermissionDocument } from '../models/latePermissions.js';
+import { sendPushNotificationToUser } from '../services/notifications.js';
 
 const router = Router();
 
@@ -267,6 +268,16 @@ router.post('/punch', async (req, res) => {
               title,
               message,
             }, admin.id);
+            
+            // Send push notification
+            sendPushNotificationToUser(admin.id, title, message, {
+              type: 'punch',
+              attendanceId: attendanceId,
+              punchType: type,
+              userId,
+            }, 'punch').catch(err => {
+              console.error('Failed to send push notification:', err);
+            });
           });
         }
       } catch (notifError) {

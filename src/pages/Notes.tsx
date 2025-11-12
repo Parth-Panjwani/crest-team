@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { useStore } from '@/hooks/useStore';
-import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter, Package, PackageX, PackageCheck, ChevronRight } from 'lucide-react';
+import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter, Package, PackageX, PackageCheck, ChevronRight, Image as ImageIcon, X, Upload, Loader2 } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Note } from '@/lib/store';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,116 @@ import {
 } from '@/components/ui/alert-dialog';
 import { RefreshButton } from '@/components/RefreshButton';
 
+// Helper function to get presigned URL for a file
+async function getPresignedFileUrl(fileKey: string, expiresIn: number = 3600): Promise<string | null> {
+  try {
+    const apiBase = import.meta.env.VITE_API_URL || ""
+    const url = apiBase
+      ? `${apiBase}/api/files/${encodeURIComponent(fileKey)}?expiresIn=${expiresIn}`
+      : `/api/files/${encodeURIComponent(fileKey)}?expiresIn=${expiresIn}`
+    const response = await fetch(url)
+    if (response.ok) {
+      const data = await response.json()
+      return data.url
+    }
+    return null
+  } catch (err) {
+    console.error("Failed to get presigned URL:", err)
+    return null
+  }
+}
+
+// Helper to extract S3 key from URL or return as-is if already a key
+function extractS3Key(imageUrl: string): string {
+  // If it's already a key (starts with "uploads/"), return as-is
+  if (imageUrl.startsWith('uploads/')) {
+    return imageUrl
+  }
+  
+  // Try to extract key from S3 URL
+  // Pattern: https://bucket.s3.region.amazonaws.com/uploads/...
+  // or: https://s3.region.amazonaws.com/bucket/uploads/...
+  const s3KeyMatch = imageUrl.match(/uploads\/[^?]+/)
+  if (s3KeyMatch) {
+    return s3KeyMatch[0]
+  }
+  
+  // If we can't extract, assume it's already a key or return as-is
+  return imageUrl
+}
+
+// Component to display note image with presigned URL
+function NoteImage({ imageUrl: imageUrlOrKey }: { imageUrl: string }) {
+  const [displayUrl, setDisplayUrl] = useState<string>(imageUrlOrKey)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    const loadImage = async () => {
+      // Try direct URL first (for backward compatibility)
+      const img = new Image()
+      img.onload = () => {
+        setLoading(false)
+        setError(false)
+      }
+      img.onerror = async () => {
+        // If direct URL fails, try to get presigned URL
+        const key = extractS3Key(imageUrlOrKey)
+        const presignedUrl = await getPresignedFileUrl(key, 3600)
+        if (presignedUrl) {
+          setDisplayUrl(presignedUrl)
+          // Verify presigned URL works
+          const presignedImg = new Image()
+          presignedImg.onload = () => {
+            setLoading(false)
+            setError(false)
+          }
+          presignedImg.onerror = () => {
+            setError(true)
+            setLoading(false)
+          }
+          presignedImg.src = presignedUrl
+        } else {
+          setError(true)
+          setLoading(false)
+        }
+      }
+      img.src = imageUrlOrKey
+    }
+
+    loadImage()
+  }, [imageUrlOrKey])
+
+  if (error) {
+    return (
+      <div className="w-full max-h-64 flex items-center justify-center bg-secondary/20 border border-glass-border rounded-lg p-4">
+        <div className="text-center">
+          <ImageIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">Failed to load image</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-2 relative">
+      {loading && (
+        <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center rounded-lg">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        </div>
+      )}
+      <img
+        src={displayUrl}
+        alt="Note attachment"
+        className="w-full max-h-64 object-contain rounded-lg border border-glass-border"
+        style={{ display: loading ? "none" : "block" }}
+        onLoad={() => setLoading(false)}
+        onError={() => setError(true)}
+      />
+    </div>
+  )
+}
+
 export default function Notes() {
   // Subscribe to store updates to force re-renders when data changes
   useStore();
@@ -63,6 +173,9 @@ export default function Notes() {
   const [noteSubCategory, setNoteSubCategory] = useState<'refill-stock' | 'remove-from-stock' | 'out-of-stock' | undefined>(undefined);
   const [noteAdminOnly, setNoteAdminOnly] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
+  const [noteImageUrl, setNoteImageUrl] = useState<string | undefined>(undefined);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
 
@@ -159,29 +272,39 @@ export default function Notes() {
     return formatted;
   };
 
-  const handleSave = () => {
-    if (!noteText.trim()) return;
+  const handleSave = async () => {
+    if (!noteText.trim() && !noteImageUrl) return;
 
-    if (editingNote) {
-      store.updateNote(editingNote.id, { 
-        text: noteText,
-        category: noteCategory,
-        subCategory: noteCategory === 'reminder' ? noteSubCategory : undefined,
-        adminOnly: noteAdminOnly
+    try {
+      if (editingNote) {
+        await store.updateNote(editingNote.id, { 
+          text: noteText,
+          category: noteCategory,
+          subCategory: noteCategory === 'reminder' ? noteSubCategory : undefined,
+          adminOnly: noteAdminOnly,
+          imageUrl: noteImageUrl
+        });
+        toast({ title: 'Note Updated', description: 'Changes saved successfully' });
+      } else {
+        await store.addNote(noteText, user?.id || '', noteCategory, noteAdminOnly, noteCategory === 'reminder' ? noteSubCategory : undefined, noteImageUrl);
+        toast({ title: 'Note Created', description: 'New note added' });
+      }
+
+      setNoteText('');
+      setNoteCategory('general');
+      setNoteSubCategory(undefined);
+      setNoteAdminOnly(false);
+      setNoteImageUrl(undefined);
+      setEditingNote(null);
+      setShowEditor(false);
+      loadNotes();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save note',
+        variant: 'destructive',
       });
-      toast({ title: 'Note Updated', description: 'Changes saved successfully' });
-    } else {
-      store.addNote(noteText, user?.id || '', noteCategory, noteAdminOnly, noteCategory === 'reminder' ? noteSubCategory : undefined);
-      toast({ title: 'Note Created', description: 'New note added' });
     }
-
-    setNoteText('');
-    setNoteCategory('general');
-    setNoteSubCategory(undefined);
-    setNoteAdminOnly(false);
-    setEditingNote(null);
-    setShowEditor(false);
-    loadNotes();
   };
 
   const handleEdit = (note: Note) => {
@@ -190,7 +313,73 @@ export default function Notes() {
     setNoteCategory(note.category);
     setNoteSubCategory(note.subCategory);
     setNoteAdminOnly(note.adminOnly);
+    setNoteImageUrl(note.imageUrl);
     setShowEditor(true);
+  };
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type (images only for notes)
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please select an image file',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Please select an image smaller than 10MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      // Get upload URL
+      const { uploadUrl, key, fileUrl } = await store.getUploadUrl(
+        file.name,
+        file.type,
+        file.size
+      );
+      
+      // Upload to S3
+      await store.uploadFileToS3(uploadUrl, file);
+      
+      // Store the S3 key instead of the full URL for presigned URL generation
+      // The key is what we need to generate presigned URLs later
+      setNoteImageUrl(key);
+      toast({
+        title: 'Image uploaded',
+        description: 'Image ready to attach',
+      });
+    } catch (error) {
+      console.error('Failed to upload image:', error);
+      toast({
+        title: 'Upload failed',
+        description: error instanceof Error ? error.message : 'Failed to upload image',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const removeImage = () => {
+    if (noteImageUrl) {
+      // Extract key from URL if possible, or just clear the URL
+      setNoteImageUrl(undefined);
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -321,15 +510,16 @@ export default function Notes() {
                 <p className="text-sm text-muted-foreground mt-1">Track and manage your notes</p>
               </div>
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  onClick={() => {
-                    setEditingNote(null);
-                    setNoteText('');
-                    setNoteCategory('general');
-                    setNoteSubCategory(undefined);
-                    setNoteAdminOnly(false);
-                    setShowEditor(true);
-                  }}
+              <Button
+                onClick={() => {
+                  setEditingNote(null);
+                  setNoteText('');
+                  setNoteCategory('general');
+                  setNoteSubCategory(undefined);
+                  setNoteAdminOnly(false);
+                  setNoteImageUrl(undefined);
+                  setShowEditor(true);
+                }}
                   className="gradient-primary shadow-md hover:shadow-lg text-sm md:text-base"
                   size="sm"
                 >
@@ -552,6 +742,9 @@ export default function Notes() {
                         }`}
                         dangerouslySetInnerHTML={{ __html: formatText(note.text) }}
                       />
+                      {note.imageUrl && (
+                        <NoteImage imageUrl={note.imageUrl} />
+                      )}
                       {note.status === 'done' && note.completedBy && note.completedAt && (
                         <div className="mb-2 p-2 bg-success/10 rounded-lg border border-success/20">
                           <p className="text-xs text-success font-medium">
@@ -910,6 +1103,52 @@ export default function Notes() {
                   Tip: Use **text** for bold, *text* for italic, • for bullets, or 1. 2. 3. for numbered lists
                 </p>
               </div>
+
+              {/* Image Upload Section */}
+              <div className="space-y-2">
+                <Label>Image (Optional)</Label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleImageSelect}
+                />
+                {noteImageUrl ? (
+                  <div className="relative">
+                    <NoteImage imageUrl={noteImageUrl} />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-2 right-2"
+                      onClick={removeImage}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingImage}
+                    className="w-full"
+                  >
+                    {uploadingImage ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Upload Image
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowEditor(false)}>
@@ -917,7 +1156,7 @@ export default function Notes() {
               </Button>
               <Button
                 onClick={handleSave}
-                disabled={!noteText.trim()}
+                disabled={(!noteText.trim() && !noteImageUrl) || uploadingImage}
                 className="gradient-primary shadow-md hover:shadow-lg"
               >
                 Save Note

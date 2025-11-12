@@ -28,12 +28,42 @@ export async function connectDB(): Promise<Db> {
 }
 
 async function createIndexes(db: Db) {
+  // Chats collection indexes
+  const chatsCollection = db.collection('chats');
+  await chatsCollection.createIndex({ id: 1 }, { unique: true });
+  await chatsCollection.createIndex({ participantIds: 1 });
+  await chatsCollection.createIndex({ lastMessageAt: -1 });
+
+  // Chat messages collection indexes
+  const chatMessagesCollection = db.collection('chatMessages');
+  await chatMessagesCollection.createIndex({ id: 1 }, { unique: true });
+  await chatMessagesCollection.createIndex({ chatId: 1 });
+  await chatMessagesCollection.createIndex({ senderId: 1 });
+  await chatMessagesCollection.createIndex({ receiverId: 1 });
+  await chatMessagesCollection.createIndex({ createdAt: -1 });
+  await chatMessagesCollection.createIndex({ chatId: 1, createdAt: -1 }); // Compound index for message history
+  await chatMessagesCollection.createIndex({ receiverId: 1, read: 1 }); // For unread count queries
   try {
-    // Users collection
+    // Users collection - drop existing indexes if they have different options
+    try {
+      await db.collection('users').dropIndex('id_1');
+    } catch (e) {
+      // Index doesn't exist or can't be dropped, continue
+    }
+    try {
+      await db.collection('users').dropIndex('pin_1');
+    } catch (e) {
+      // Index doesn't exist or can't be dropped, continue
+    }
     await db.collection('users').createIndex({ id: 1 }, { unique: true });
     await db.collection('users').createIndex({ pin: 1 }, { unique: true });
     
-    // Attendance collection
+    // Attendance collection - drop existing index if it has different options
+    try {
+      await db.collection('attendance').dropIndex('userId_1_date_1');
+    } catch (e) {
+      // Index doesn't exist or can't be dropped, continue
+    }
     await db.collection('attendance').createIndex({ userId: 1, date: 1 }, { unique: true });
     
     // Notes collection
