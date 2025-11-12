@@ -632,6 +632,19 @@ class Store {
     return this.attendance.find(a => a.userId === userId && a.date === today) || null;
   }
 
+  async clearAttendance(adminId: string): Promise<{ message: string; deletedCount: number }> {
+    await this.ensureDataLoaded();
+    const result = await this.syncToAPI<{ message: string; deletedCount: number }>(
+      'attendance/clear',
+      'DELETE',
+      { adminId }
+    );
+    // Clear local attendance data
+    this.attendance = [];
+    this.notifyListeners();
+    return result;
+  }
+
   async punch(userId: string, type: Punch['type'], options?: { manualPunch?: boolean; punchedBy?: string; reason?: string; customTime?: Date }) {
     // For break punches, reason is required (unless it's a manual punch by admin)
     if ((type === 'BREAK_START' || type === 'BREAK_END') && !options?.reason && !options?.manualPunch) {

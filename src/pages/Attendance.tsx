@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle, Bell, AlertTriangle } from 'lucide-react';
+import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle, Bell, AlertTriangle, Trash2 } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Attendance as AttendanceType, User, STORE_TIMINGS, Punch } from '@/lib/store';
 import { formatMinutesToHours } from '@/utils/timeFormat';
@@ -29,6 +29,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useStore } from '@/hooks/useStore';
 import { RefreshButton } from '@/components/RefreshButton';
@@ -493,6 +503,7 @@ export default function Attendance() {
   const [breakReasonDialogOpen, setBreakReasonDialogOpen] = useState(false);
   const [breakReason, setBreakReason] = useState('');
   const [pendingBreakType, setPendingBreakType] = useState<'BREAK_START' | 'BREAK_END' | null>(null);
+  const [clearAttendanceDialogOpen, setClearAttendanceDialogOpen] = useState(false);
 
   const handleManualPunch = async () => {
     if (!selectedEmployeeForPunch || !user) return;
@@ -562,6 +573,16 @@ export default function Attendance() {
                   >
                     <UserPlus className="w-4 h-4 mr-2" />
                     Manual Punch
+                  </Button>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    onClick={() => setClearAttendanceDialogOpen(true)}
+                    variant="destructive"
+                    className="shadow-md hover:shadow-lg"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Clear All
                   </Button>
                 </motion.div>
               </div>
@@ -1255,8 +1276,47 @@ export default function Attendance() {
                   {pendingBreakType === 'BREAK_START' ? 'Start Break' : 'End Break'}
                 </Button>
               </DialogFooter>
-            </DialogContent>
+              </DialogContent>
           </Dialog>
+
+          {/* Clear Attendance Confirmation Dialog */}
+          <AlertDialog open={clearAttendanceDialogOpen} onOpenChange={setClearAttendanceDialogOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear All Attendance Records?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action will permanently delete all attendance records for all staff members. This cannot be undone.
+                  Are you sure you want to proceed?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    if (!user) return;
+                    try {
+                      const result = await store.clearAttendance(user.id);
+                      toast({
+                        title: 'Attendance Cleared',
+                        description: `Successfully deleted ${result.deletedCount} attendance record(s).`,
+                      });
+                      setClearAttendanceDialogOpen(false);
+                      await store.refreshData();
+                    } catch (error) {
+                      toast({
+                        title: 'Error',
+                        description: error instanceof Error ? error.message : 'Failed to clear attendance records',
+                        variant: 'destructive',
+                      });
+                    }
+                  }}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Clear All Records
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </Layout>
     );

@@ -339,5 +339,35 @@ router.get('/all', async (req, res) => {
   }
 });
 
+// Clear all attendance records (admin only)
+router.delete('/clear', async (req, res) => {
+  try {
+    const { adminId } = req.body;
+    
+    // Verify admin
+    if (adminId) {
+      const usersCollection = await getCollection('users');
+      const admin = await usersCollection.findOne({ id: adminId, role: 'admin' });
+      if (!admin) {
+        return res.status(403).json({ error: 'Only admins can clear attendance records' });
+      }
+    }
+
+    const attendanceCollection = await getCollection<AttendanceDocument>('attendance');
+    const result = await attendanceCollection.deleteMany({});
+    
+    // Broadcast that all attendance was cleared
+    broadcastDataUpdate('attendance', { cleared: true });
+    
+    res.json({ 
+      message: 'All attendance records cleared successfully',
+      deletedCount: result.deletedCount 
+    });
+  } catch (error) {
+    console.error('Clear attendance error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
 
