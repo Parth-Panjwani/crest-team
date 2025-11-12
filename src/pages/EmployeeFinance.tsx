@@ -265,8 +265,8 @@ export default function EmployeeFinance() {
     const pendingPurchases = store.getPendingStorePurchases(emp.id)
     
     // If editing, merge existing deducted items with new pending items
-    let advances = existingSalary?.advances || []
-    let storePurchases = existingSalary?.storePurchases || []
+    const advances = existingSalary?.advances ? [...existingSalary.advances] : []
+    const storePurchases = existingSalary?.storePurchases ? [...existingSalary.storePurchases] : []
     
     // Add any new pending items that aren't already in the salary
     const existingAdvanceIds = advances.map(a => a.id)
