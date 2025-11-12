@@ -26,17 +26,31 @@ export default function Login() {
   }, [])
 
   const handleLogin = useCallback(async () => {
-    const user = await store.login(pin)
-    if (user) {
+    try {
+      const user = await store.login(pin)
+      if (user) {
+        toast({
+          title: "Welcome back!",
+          description: `Logged in as ${user.name}`,
+        })
+        navigate("/dashboard")
+      } else {
+        toast({
+          title: "Invalid PIN",
+          description: "Please check your PIN and try again",
+          variant: "destructive",
+        })
+        setPin("")
+      }
+    } catch (error: unknown) {
+      console.error("Login error:", error)
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Cannot connect to database. Please check your connection."
       toast({
-        title: "Welcome back!",
-        description: `Logged in as ${user.name}`,
-      })
-      navigate("/dashboard")
-    } else {
-      toast({
-        title: "Invalid PIN",
-        description: "Please try again",
+        title: "Connection Error",
+        description: errorMessage,
         variant: "destructive",
       })
       setPin("")

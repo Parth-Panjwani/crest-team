@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -17,11 +18,34 @@ import { store } from "./lib/store";
 
 const queryClient = new QueryClient();
 
+// Initialize data loading on app startup
+const AppInitializer = () => {
+  useEffect(() => {
+    // Clear old localStorage data first
+    const oldData = localStorage.getItem('emp-management-data');
+    if (oldData) {
+      console.log('Clearing old localStorage data...');
+      localStorage.removeItem('emp-management-data');
+    }
+    
+    // Load all data from MongoDB on app startup
+    store.refreshData().catch((error) => {
+      console.error('Failed to load data from MongoDB:', error);
+      // In local dev, show helpful message
+      if (error.message?.includes('Failed to fetch')) {
+        console.warn('⚠️ MongoDB API not available in local dev. Use: npx vercel dev');
+      }
+    });
+  }, []);
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <AppInitializer />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />

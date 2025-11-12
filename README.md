@@ -1,87 +1,65 @@
-# Welcome to your Lovable project
+# Employee Management System
 
-## Project info
+Modern employee management system built with React, Vite, and MongoDB.
 
-**URL**: https://lovable.dev/projects/8f8e8f7d-0020-49a3-975e-e69ac28b26c5
+## 🚀 Quick Start
 
-## How can I edit this code?
+### Local Development
 
-There are several ways of editing your application.
+**Run in TWO terminals:**
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/8f8e8f7d-0020-49a3-975e-e69ac28b26c5) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+**Terminal 1 - Frontend:**
+```bash
 npm run dev
 ```
+Opens at: `http://localhost:5173`
 
-**Edit a file directly in GitHub**
+**Terminal 2 - API:**
+```bash
+npm run dev:api
+```
+Serves API at: `http://localhost:3000/api/*`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Default Login PINs
 
-**Use GitHub Codespaces**
+- **Admin**: `1234` (Store Owner)
+- **Employee 1**: `5678` (Alice Johnson)  
+- **Employee 2**: `9012` (Bob Smith)
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## 📦 Tech Stack
 
-## What technologies are used for this project?
+- **Frontend**: React + Vite + TypeScript
+- **UI**: Tailwind CSS + Shadcn UI
+- **Backend**: Vercel Serverless Functions
+- **Database**: MongoDB
+- **Deployment**: Vercel
 
-This project is built with:
+## 🏗️ Project Structure
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```
+├── api/              # Serverless functions (MongoDB API)
+│   ├── [...path].ts  # Main API handler
+│   └── mongodb.ts    # MongoDB connection
+├── src/
+│   ├── components/   # React components
+│   ├── pages/        # Page components
+│   └── lib/          # Store & utilities
+└── public/           # Static assets
+```
 
-## How can I deploy this project?
+## 🔧 Configuration
 
-### Quick Deploy (Recommended)
+MongoDB connection is configured in `api/mongodb.ts`. For production, set `MONGODB_URI` environment variable in Vercel.
 
-Deploy everything to Vercel - both frontend and backend in one deployment!
+## 📝 Features
 
-1. **Deploy to Vercel**: See `DEPLOY_QUICKSTART.md` for 3-minute setup guide
-2. Everything works out of the box - no separate backend needed!
+- ✅ Employee attendance tracking
+- ✅ Leave management
+- ✅ Salary & deductions tracking
+- ✅ Notes/Orders management
+- ✅ Real-time data sync
+- ✅ Multi-user support
 
-Quick start: See `DEPLOY_QUICKSTART.md` for instant deployment.
+## 🚢 Deployment
 
-### Alternative: Lovable Deploy
-
-For simple static deployment (no real-time features):
-- Open [Lovable](https://lovable.dev/projects/8f8e8f7d-0020-49a3-975e-e69ac28b26c5) and click on Share -> Publish.
-
-**Note**: Lovable deploy won't include the backend API. Use Vercel for full functionality with both frontend and backend.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Push to GitHub - Vercel auto-deploys on every push.

@@ -1,7 +1,6 @@
-server/
-node_modules/
-.env
-.env.local
+node_modules
+.next
+.vercel
+dist
 *.log
 .DS_Store
-

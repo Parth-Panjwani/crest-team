@@ -14,8 +14,14 @@ export async function connectToDatabase(): Promise<Db> {
   }
 
   try {
+    console.log('Connecting to MongoDB...');
+    console.log('URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@')); // Hide password
+    console.log('Database:', DB_NAME);
+    
     client = new MongoClient(MONGODB_URI);
     await client.connect();
+    console.log('✅ MongoDB connected successfully');
+    
     db = client.db(DB_NAME);
     
     // Ensure all collections exist
@@ -28,8 +34,16 @@ export async function connectToDatabase(): Promise<Db> {
     await initializeDefaultData(db);
     
     return db;
-  } catch (error) {
-    console.error('Failed to connect to MongoDB:', error);
+  } catch (error: any) {
+    console.error('❌ Failed to connect to MongoDB:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error name:', error.name);
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      throw new Error('Cannot connect to MongoDB server. Check your connection string and network access.');
+    }
+    if (error.code === 8000 || error.message?.includes('authentication')) {
+      throw new Error('MongoDB authentication failed. Check your credentials.');
+    }
     throw error;
   }
 }
@@ -37,35 +51,38 @@ export async function connectToDatabase(): Promise<Db> {
 async function createIndexes(db: Db) {
   try {
     // Users collection indexes
-    await db.collection('users').createIndex({ pin: 1 }, { unique: true });
-    await db.collection('users').createIndex({ id: 1 }, { unique: true });
+    await db.collection('users').createIndex({ pin: 1 }, { unique: true, sparse: true }).catch(() => {});
+    await db.collection('users').createIndex({ id: 1 }, { unique: true, sparse: true }).catch(() => {});
     
     // Attendance collection indexes
-    await db.collection('attendance').createIndex({ userId: 1, date: 1 }, { unique: true });
+    await db.collection('attendance').createIndex({ userId: 1, date: 1 }, { unique: true, sparse: true }).catch(() => {});
     
     // Notes collection indexes
-    await db.collection('notes').createIndex({ createdBy: 1 });
-    await db.collection('notes').createIndex({ deleted: 1 });
+    await db.collection('notes').createIndex({ createdBy: 1 }).catch(() => {});
+    await db.collection('notes').createIndex({ deleted: 1 }).catch(() => {});
     
     // Leaves collection indexes
-    await db.collection('leaves').createIndex({ userId: 1 });
+    await db.collection('leaves').createIndex({ userId: 1 }).catch(() => {});
     
     // Salaries collection indexes
-    await db.collection('salaries').createIndex({ userId: 1, month: 1 }, { unique: true });
+    await db.collection('salaries').createIndex({ userId: 1, month: 1 }, { unique: true, sparse: true }).catch(() => {});
     
     // Salary history indexes
-    await db.collection('salaryHistory').createIndex({ userId: 1 });
+    await db.collection('salaryHistory').createIndex({ userId: 1 }).catch(() => {});
     
     // Pending advances indexes
-    await db.collection('pendingAdvances').createIndex({ userId: 1 });
+    await db.collection('pendingAdvances').createIndex({ userId: 1 }).catch(() => {});
     
     // Pending store purchases indexes
-    await db.collection('pendingStorePurchases').createIndex({ userId: 1 });
+    await db.collection('pendingStorePurchases').createIndex({ userId: 1 }).catch(() => {});
     
     // Announcements collection indexes
-    await db.collection('announcements').createIndex({ createdAt: -1 });
-  } catch (error) {
-    console.error('Error creating indexes:', error);
+    await db.collection('announcements').createIndex({ createdAt: -1 }).catch(() => {});
+    
+    console.log('✅ Indexes created/verified');
+  } catch (error: any) {
+    console.error('Error creating indexes:', error.message);
+    // Don't throw - indexes are optional
   }
 }
 
