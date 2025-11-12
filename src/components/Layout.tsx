@@ -41,14 +41,16 @@ export const Layout = ({ children }: LayoutProps) => {
   return (
     <div className="min-h-screen flex flex-col md:flex-row w-full">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:flex-col md:w-64 glass-strong border-r border-glass-border">
+      <aside className="hidden md:flex md:flex-col md:w-64 glass-strong border-r border-glass-border fixed left-0 top-0 h-screen overflow-y-auto">
         <div className="p-4">
-          <div className="flex items-center justify-center p-4 rounded-2xl bg-white border-2 border-border shadow-md mb-4 min-h-[120px]">
+          <div className="flex items-center justify-center p-2 rounded-2xl bg-white border-2 border-border shadow-md mb-4 h-[150px]">
             <img
               src="/logo.png"
               alt="Company Logo"
-              className="h-32 w-auto object-contain max-w-full"
-              style={{ display: "block" }}
+              className="object-contain w-full h-full"
+              style={{
+                display: "block",
+              }}
             />
           </div>
           {user && (
@@ -90,7 +92,7 @@ export const Layout = ({ children }: LayoutProps) => {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 pb-20 md:pb-6">{children}</main>
+      <main className="flex-1 pb-20 md:pb-6 md:ml-64">{children}</main>
 
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 glass-strong border-t border-glass-border z-50 backdrop-blur-lg">

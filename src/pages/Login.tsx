@@ -112,11 +112,14 @@ export default function Login() {
               className="mb-6"
             >
               <div className="flex items-center justify-center mb-4">
-                <div className="flex items-center justify-center p-6 rounded-2xl bg-white border-2 border-border shadow-md w-full max-w-[240px] h-[180px] mx-auto">
+                <div className="flex items-center justify-center p-3 rounded-2xl bg-white border-2 border-border shadow-md w-full max-w-[300px] h-[220px] mx-auto">
                   <img
                     src="/logo.png"
                     alt="Company Logo"
-                    className="h-full w-full object-contain"
+                    className="object-contain w-full h-full"
+                    style={{
+                      display: "block",
+                    }}
                     onError={(e) => {
                       console.error("Logo failed to load from /logo.png")
                       const img = e.target as HTMLImageElement

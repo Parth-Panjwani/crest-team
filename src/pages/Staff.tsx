@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Plus, Edit, Trash2, Users, Shield, User, History, X } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, User as UserType, Role, SalaryHistory } from '@/lib/store';
+import { useStore } from '@/hooks/useStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,8 +34,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { RefreshButton } from '@/components/RefreshButton';
 
 export default function Staff() {
+  // Subscribe to store updates to force re-renders when data changes
+  useStore();
+  
   const user = store.getCurrentUser();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -65,6 +70,13 @@ export default function Staff() {
 
     loadStaff();
   }, [user, navigate]);
+  
+  // Refresh staff when store updates (triggered by useStore hook)
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      loadStaff();
+    }
+  }); // Runs on every render (which happens when store updates via useStore)
 
   const loadStaff = () => {
     const allUsers = store.getAllUsers();
@@ -248,6 +260,11 @@ export default function Staff() {
           <div className="flex justify-between items-start mb-4">
             <div>
               <h1 className="text-3xl font-bold mb-2">Staff Management</h1>
+            </div>
+            <RefreshButton onRefresh={loadStaff} />
+          </div>
+          <div className="flex justify-between items-start mb-4">
+            <div>
               <p className="text-muted-foreground">
                 Manage your team members and their access
               </p>

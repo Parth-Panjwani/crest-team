@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { store } from "./lib/store";
+import { useWebSocket } from "./hooks/useWebSocket";
 import FullScreenLoader from "./components/FullScreenLoader";
 
 const Login = lazy(() => import("./pages/Login"));
@@ -19,8 +20,38 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
 
-// Initialize data loading on app startup
+// Initialize data loading and WebSocket on app startup
 const AppInitializer = () => {
+  const user = store.getCurrentUser();
+  
+  // Set up WebSocket for real-time updates - auto-refresh on all CRUD operations
+  useWebSocket(user?.id || null, (dataType, data) => {
+    console.log(`📡 Real-time update: ${dataType}`, data);
+    // Auto-refresh data for all update types - WebSocket handles all CRUD operations
+    store.refreshData().catch((error) => {
+      console.error('Failed to refresh data after WebSocket update:', error);
+    });
+    
+    // Handle specific update types that need additional refresh
+    if (user) {
+      if (dataType === 'notification') {
+        store.loadNotifications(user.id).catch((error) => {
+          console.error('Failed to reload notifications:', error);
+        });
+      } else if (dataType === 'lateApproval' || dataType === 'latePermission') {
+        // Refresh attendance data when approvals/permissions change
+        store.refreshData().catch((error) => {
+          console.error('Failed to refresh data after approval update:', error);
+        });
+      } else if (dataType === 'attendance') {
+        // Attendance updates are already handled by refreshData, but ensure it's called
+        store.refreshData().catch((error) => {
+          console.error('Failed to refresh data after attendance update:', error);
+        });
+      }
+    }
+  });
+
   useEffect(() => {
     // Clear old localStorage data first
     const oldData = localStorage.getItem('emp-management-data');
@@ -34,10 +65,11 @@ const AppInitializer = () => {
       console.error('Failed to load data from MongoDB:', error);
       // In local dev, show helpful message
       if (error.message?.includes('Failed to fetch')) {
-        console.warn('⚠️ MongoDB API not available in local dev. Use: npx vercel dev');
+        console.warn('⚠️ Backend server not available. Please run "npm run dev:server" or "npm run dev:all"');
       }
     });
   }, []);
+  
   return null;
 };
 

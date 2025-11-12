@@ -3,10 +3,25 @@ import { motion } from 'framer-motion';
 import { Calendar as CalendarIcon, Plus, Check, X } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Leave as LeaveType } from '@/lib/store';
+import { useStore } from '@/hooks/useStore';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RefreshButton } from '@/components/RefreshButton';
 
 export default function Leave() {
+  // Subscribe to store updates to force re-renders when data changes
+  useStore();
+  
   const user = store.getCurrentUser();
   const isAdmin = user?.role === 'admin';
   const [leaves, setLeaves] = useState<LeaveType[]>([]);
@@ -16,6 +31,10 @@ export default function Leave() {
     type: 'full' as 'full' | 'half',
     reason: '',
   });
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [selectedLeave, setSelectedLeave] = useState<LeaveType | null>(null);
+  const [approvalAction, setApprovalAction] = useState<'approve' | 'reject' | null>(null);
+  const [salaryDeduction, setSalaryDeduction] = useState(false);
   const { toast } = useToast();
 
   const loadLeaves = useCallback(() => {
@@ -29,6 +48,11 @@ export default function Leave() {
   useEffect(() => {
     loadLeaves();
   }, [loadLeaves]);
+  
+  // Refresh leaves when store updates (triggered by useStore hook)
+  useEffect(() => {
+    loadLeaves();
+  }); // Runs on every render (which happens when store updates via useStore)
 
   const handleSubmit = () => {
     if (!formData.date || !formData.reason.trim()) {
@@ -51,16 +75,48 @@ export default function Leave() {
     loadLeaves();
   };
 
-  const handleApprove = (id: string) => {
-    store.updateLeaveStatus(id, 'approved');
-    toast({ title: 'Leave Approved' });
-    loadLeaves();
+  const handleApprove = (leave: LeaveType) => {
+    setSelectedLeave(leave);
+    setApprovalAction('approve');
+    setSalaryDeduction(false);
+    setApprovalDialogOpen(true);
   };
 
-  const handleReject = (id: string) => {
-    store.updateLeaveStatus(id, 'rejected');
-    toast({ title: 'Leave Rejected' });
-    loadLeaves();
+  const handleReject = (leave: LeaveType) => {
+    setSelectedLeave(leave);
+    setApprovalAction('reject');
+    setSalaryDeduction(false);
+    setApprovalDialogOpen(true);
+  };
+
+  const confirmApproval = async () => {
+    if (!selectedLeave || !approvalAction || !user) return;
+    
+    try {
+      await store.updateLeaveStatus(
+        selectedLeave.id,
+        approvalAction,
+        approvalAction === 'approve' ? (salaryDeduction || false) : false,
+        user.id
+      );
+      toast({
+        title: approvalAction === 'approve' ? 'Leave Approved' : 'Leave Rejected',
+        description: approvalAction === 'approve' && salaryDeduction
+          ? 'Leave approved and salary will be deducted'
+          : undefined,
+      });
+      setApprovalDialogOpen(false);
+      setSelectedLeave(null);
+      setApprovalAction(null);
+      setSalaryDeduction(false);
+      loadLeaves();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update leave status',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (
@@ -75,17 +131,20 @@ export default function Leave() {
             <h1 className="text-3xl font-bold">
               {isAdmin ? 'Leave Approvals' : 'Leave Requests'}
             </h1>
-            {!isAdmin && (
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  onClick={() => setShowForm(!showForm)}
-                  className="gradient-primary shadow-md hover:shadow-lg"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Apply Leave
-                </Button>
-              </motion.div>
-            )}
+            <div className="flex items-center gap-2">
+              <RefreshButton onRefresh={loadLeaves} />
+              {!isAdmin && (
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    onClick={() => setShowForm(!showForm)}
+                    className="gradient-primary shadow-md hover:shadow-lg"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Apply Leave
+                  </Button>
+                </motion.div>
+              )}
+            </div>
           </div>
 
           {/* Application Form */}
@@ -157,10 +216,13 @@ export default function Leave() {
               </div>
             </motion.div>
           )}
-        </motion.div>
 
-        {/* Leave List */}
-        <div className="space-y-4">
+          {/* Leave List */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
           {leaves.length === 0 ? (
             <div className="glass-card rounded-2xl p-12 text-center">
               <CalendarIcon className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
@@ -224,7 +286,7 @@ export default function Leave() {
                   <div className="flex gap-3">
                     <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="flex-1">
                       <Button
-                        onClick={() => handleApprove(leave.id)}
+                        onClick={() => handleApprove(leave)}
                         className="w-full bg-success hover:bg-success/90"
                       >
                         <Check className="w-4 h-4 mr-2" />
@@ -233,7 +295,7 @@ export default function Leave() {
                     </motion.div>
                     <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="flex-1">
                       <Button
-                        onClick={() => handleReject(leave.id)}
+                        onClick={() => handleReject(leave)}
                         variant="destructive"
                         className="w-full"
                       >
@@ -243,10 +305,75 @@ export default function Leave() {
                     </motion.div>
                   </div>
                 )}
+
+                {leave.salaryDeduction && leave.status === 'approved' && (
+                  <div className="mt-3 p-3 rounded-xl bg-warning/10 border border-warning/30">
+                    <p className="text-xs text-warning font-semibold">
+                      ⚠️ Salary will be deducted for this leave
+                    </p>
+                  </div>
+                )}
               </motion.div>
             ))
           )}
-        </div>
+          </motion.div>
+
+          {/* Approval Dialog */}
+          <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>
+                  {approvalAction === 'approve' ? 'Approve Leave' : 'Reject Leave'}
+                </DialogTitle>
+                <DialogDescription>
+                  {selectedLeave && (
+                    <>
+                      {store.getAllUsers().find(u => u.id === selectedLeave.userId)?.name} - {new Date(selectedLeave.date).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })} ({selectedLeave.type === 'full' ? 'Full Day' : 'Half Day'})
+                    </>
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                {approvalAction === 'approve' && (
+                  <div className="flex items-center space-x-2 p-4 rounded-xl border border-glass-border bg-card">
+                    <Checkbox
+                      id="salaryDeduction"
+                      checked={salaryDeduction}
+                      onCheckedChange={(checked) => setSalaryDeduction(checked === true)}
+                    />
+                    <Label htmlFor="salaryDeduction" className="text-sm font-medium cursor-pointer flex-1">
+                      Deduct salary for this leave
+                      <span className="block text-xs text-muted-foreground mt-1">
+                        {selectedLeave?.type === 'full' ? 'Full day' : 'Half day'} salary will be deducted from the employee's monthly salary
+                      </span>
+                    </Label>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setApprovalDialogOpen(false);
+                  setSelectedLeave(null);
+                  setApprovalAction(null);
+                  setSalaryDeduction(false);
+                }}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmApproval}
+                  className={approvalAction === 'approve' ? 'bg-success hover:bg-success/90' : ''}
+                  variant={approvalAction === 'reject' ? 'destructive' : 'default'}
+                >
+                  {approvalAction === 'approve' ? 'Approve' : 'Reject'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </motion.div>
       </div>
     </Layout>
   );

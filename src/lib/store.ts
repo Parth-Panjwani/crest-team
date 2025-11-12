@@ -22,7 +22,11 @@ export interface Punch {
   type: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END';
   manualPunch?: boolean; // true if punched by admin
   punchedBy?: string; // admin user ID who did the manual punch
-  reason?: string; // reason for manual punch
+  reason?: string; // reason for manual punch or break
+  status?: 'on-time' | 'late' | 'early' | 'overtime';
+  statusMessage?: string;
+  lateApprovalId?: string; // ID of late approval if this punch is late and needs approval
+  lateApprovalStatus?: 'pending' | 'approved' | 'rejected'; // Status of late approval
 }
 
 export interface Attendance {
@@ -33,6 +37,10 @@ export interface Attendance {
   totals: {
     workMin: number;
     breakMin: number;
+  };
+  status?: {
+    checkIn?: 'on-time' | 'late' | 'early';
+    checkOut?: 'on-time' | 'early' | 'overtime';
   };
 }
 
@@ -58,6 +66,9 @@ export interface Leave {
   type: 'full' | 'half';
   reason: string;
   status: 'pending' | 'approved' | 'rejected';
+  salaryDeduction?: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
 }
 
 export interface Advance {
@@ -131,6 +142,49 @@ export interface Announcement {
   createdAt: Date;
   expiresAt?: Date;
   readBy: string[];
+}
+
+export interface Notification {
+  id: string;
+  type: 'punch' | 'leave' | 'note' | 'salary' | 'announcement';
+  title: string;
+  message: string;
+  userId?: string;
+  targetUserId?: string;
+  read: boolean;
+  createdAt: string;
+  data?: Record<string, unknown>;
+}
+
+export interface LatePermission {
+  id: string;
+  userId: string;
+  date: string;
+  requestedAt: string;
+  reason: string;
+  expectedArrivalTime?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface LateApproval {
+  id: string;
+  userId: string;
+  attendanceId: string;
+  punchId: string;
+  date: string;
+  punchTime: string;
+  lateByMinutes: number;
+  hasPermission: boolean;
+  permissionId?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  adminNotes?: string;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -216,9 +270,11 @@ class Store {
   private salaryHistory: SalaryHistory[] = [];
   private pendingAdvances: PendingAdvance[] = [];
   private pendingStorePurchases: PendingStorePurchase[] = [];
+  private notifications: Notification[] = [];
   private currentUser: User | null = null;
   private dataLoaded: boolean = false;
   private loadingPromise: Promise<void> | null = null;
+  private updateListeners: Set<() => void> = new Set();
 
   constructor() {
     // Clear old localStorage data (except current-user-id for session)
@@ -252,8 +308,11 @@ class Store {
 
     this.loadingPromise = (async () => {
       try {
-        const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
-        const response = await fetch(`${apiBase}/api/bootstrap`);
+        // In development, use relative URL to leverage Vite proxy
+        // In production, use full API URL from environment
+        const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+        const bootstrapUrl = apiBase ? `${apiBase}/api/bootstrap` : '/api/bootstrap';
+        const response = await fetch(bootstrapUrl);
 
         if (!response.ok) {
           throw new Error(`Bootstrap request failed: ${response.status} ${response.statusText}`);
@@ -354,8 +413,11 @@ class Store {
     data?: Record<string, unknown>
   ): Promise<TResponse> {
     try {
-      const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
-      const response = await fetch(`${apiBase}/api/${endpoint}`, {
+      // In development, use relative URL to leverage Vite proxy
+      // In production, use full API URL from environment
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      const apiUrl = apiBase ? `${apiBase}/api/${endpoint}` : `/api/${endpoint}`;
+      const response = await fetch(apiUrl, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: data ? JSON.stringify(data) : undefined,
@@ -382,24 +444,41 @@ class Store {
     }
   }
 
+  // Subscribe to store updates
+  subscribe(listener: () => void): () => void {
+    this.updateListeners.add(listener);
+    return () => {
+      this.updateListeners.delete(listener);
+    };
+  }
+
+  // Notify all listeners of data changes
+  private notifyListeners(): void {
+    this.updateListeners.forEach(listener => listener());
+  }
+
   // Refresh data from MongoDB
   async refreshData(): Promise<void> {
     this.dataLoaded = false;
     this.loadingPromise = null;
     await this.loadAllDataFromMongoDB();
+    this.notifyListeners();
   }
 
   // Auth - ALWAYS uses MongoDB, no localStorage fallback
   async login(pin: string): Promise<User | null> {
-    const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
+    // In development, use relative URL to leverage Vite proxy
+    // In production, use full API URL from environment
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const loginUrl = apiBase ? `${apiBase}/api/auth/login` : '/api/auth/login';
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     try {
-      console.log('Making login request to:', `${apiBase}/api/auth/login`);
+      console.log('Making login request to:', loginUrl);
       
       // Try login via API (MongoDB) - don't refresh all data first, just login
-      const response = await fetch(`${apiBase}/api/auth/login`, {
+      const response = await fetch(loginUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),
@@ -435,7 +514,7 @@ class Store {
 
       // Handle timeout
       if (getErrorName(error) === 'AbortError') {
-        throw new Error('Request timeout - API server may not be running. Please run "npm run dev:api" in another terminal.');
+        throw new Error('Request timeout - Backend server may not be running. Please run "npm run dev:server" in another terminal.');
       }
 
       // In local dev, if API is not available, show helpful error
@@ -445,7 +524,7 @@ class Store {
         message.includes('NetworkError') ||
         message.includes('ERR_CONNECTION_REFUSED')
       ) {
-        throw new Error('API server not running. Please run "npm run dev:api" in another terminal.');
+        throw new Error('Backend server not running. Please run "npm run dev:server" or "npm run dev:all" to start both frontend and backend.');
       }
 
       throw error instanceof Error ? error : new Error(message || 'Login request failed');
@@ -483,7 +562,7 @@ class Store {
       this.users.push(user);
       this.users.sort((a, b) => a.name.localeCompare(b.name));
       this.usersById.set(user.id, user);
-      await this.refreshData(); // Refresh to ensure consistency
+      // WebSocket will auto-refresh
       return user;
     }
     throw new Error('Failed to create user');
@@ -522,7 +601,7 @@ class Store {
         this.usersById.set(id, user);
       }
       
-      await this.refreshData();
+      // WebSocket will auto-refresh
       return user;
     }
     return null;
@@ -536,7 +615,7 @@ class Store {
     await this.syncToAPI(`users/${id}`, 'DELETE');
     this.users = this.users.filter(u => u.id !== id);
     this.usersById.delete(id);
-    await this.refreshData();
+    // WebSocket will auto-refresh
     return true;
   }
 
@@ -554,6 +633,11 @@ class Store {
   }
 
   async punch(userId: string, type: Punch['type'], options?: { manualPunch?: boolean; punchedBy?: string; reason?: string; customTime?: Date }) {
+    // For break punches, reason is required (unless it's a manual punch by admin)
+    if ((type === 'BREAK_START' || type === 'BREAK_END') && !options?.reason && !options?.manualPunch) {
+      throw new Error('Reason is required for break punches');
+    }
+    
     const punchTime = options?.customTime || new Date();
     const punchDate = punchTime.toISOString().split('T')[0];
     
@@ -593,7 +677,7 @@ class Store {
       reason: options?.reason,
       customTime: options?.customTime?.toISOString()
     });
-    await this.refreshData();
+    // WebSocket will auto-refresh
     return {
       ...result,
       punches: result.punches.map(punch => ({ ...punch, at: new Date(punch.at) })),
@@ -647,7 +731,7 @@ class Store {
   async addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false): Promise<Note> {
     const note = await this.syncToAPI<NotePayload>('notes', 'POST', { text, createdBy: userId, category, adminOnly });
     if (note) {
-      await this.refreshData();
+      // WebSocket will auto-refresh
       return {
         ...note,
         createdAt: new Date(note.createdAt),
@@ -661,7 +745,7 @@ class Store {
     if (note) {
       Object.assign(note, updates);
       await this.syncToAPI(`notes/${id}`, 'PUT', updates);
-      await this.refreshData();
+      // WebSocket will auto-refresh
     }
   }
 
@@ -669,7 +753,7 @@ class Store {
     const note = this.notes.find(n => n.id === id);
     if (note) {
       await this.syncToAPI(`notes/${id}`, 'DELETE', { deletedBy });
-      await this.refreshData();
+      // WebSocket will auto-refresh
     }
   }
 
@@ -680,13 +764,13 @@ class Store {
       note.deletedAt = undefined;
       note.deletedBy = undefined;
       await this.syncToAPI(`notes/${id}/restore`, 'POST', {});
-      await this.refreshData();
+      // WebSocket will auto-refresh
     }
   }
 
   async permanentDeleteNote(id: string) {
     await this.syncToAPI(`notes/${id}/permanent`, 'DELETE', {});
-    await this.refreshData();
+    // WebSocket will auto-refresh
   }
 
   getNotes(status?: 'pending' | 'done', showAdminOnly: boolean = false, currentUserId?: string): Note[] {
@@ -721,19 +805,15 @@ class Store {
   async applyLeave(userId: string, date: string, type: 'full' | 'half', reason: string): Promise<Leave> {
     const leave = await this.syncToAPI<Leave>('leaves', 'POST', { userId, date, type, reason });
     if (leave) {
-      await this.refreshData();
+      // WebSocket will auto-refresh
     return leave;
     }
     throw new Error('Failed to create leave');
   }
 
-  async updateLeaveStatus(id: string, status: 'approved' | 'rejected') {
-    const leave = this.leaves.find(l => l.id === id);
-    if (leave) {
-      leave.status = status;
-      await this.syncToAPI(`leaves/${id}`, 'PUT', { status });
-      await this.refreshData();
-    }
+  async updateLeaveStatus(id: string, status: 'approved' | 'rejected', salaryDeduction?: boolean, approvedBy?: string) {
+    await this.syncToAPI(`leaves/${id}`, 'PUT', { status, salaryDeduction, approvedBy });
+    // WebSocket will auto-refresh
   }
 
   getUserLeaves(userId: string): Leave[] {
@@ -783,7 +863,7 @@ class Store {
       });
     }
     
-    await this.refreshData();
+    // WebSocket will auto-refresh
   }
 
   getSalariesForMonth(month: string): Salary[] {
@@ -802,14 +882,14 @@ class Store {
 
   async deleteSalary(id: string) {
     await this.syncToAPI(`salaries/${id}`, 'DELETE');
-    await this.refreshData();
+    // WebSocket will auto-refresh
   }
 
   // Pending Advances
   async addPendingAdvance(userId: string, date: string, amount: number, description: string): Promise<PendingAdvance> {
     const advance = await this.syncToAPI<PendingAdvance>('pendingAdvances', 'POST', { userId, date, amount, description });
     if (advance) {
-      await this.refreshData();
+      // WebSocket will auto-refresh
       return advance;
     }
     throw new Error('Failed to create advance');
@@ -830,20 +910,20 @@ class Store {
       advance.deducted = true;
       advance.deductedInSalaryId = salaryId;
       await this.syncToAPI(`pendingAdvances/${advanceId}`, 'PUT', { salaryId });
-      await this.refreshData();
+      // WebSocket will auto-refresh
     }
   }
 
   async deletePendingAdvance(id: string) {
     await this.syncToAPI(`pendingAdvances/${id}`, 'DELETE');
-    await this.refreshData();
+    // WebSocket will auto-refresh
   }
 
   // Pending Store Purchases
   async addPendingStorePurchase(userId: string, date: string, amount: number, description: string): Promise<PendingStorePurchase> {
     const purchase = await this.syncToAPI<PendingStorePurchase>('pendingStorePurchases', 'POST', { userId, date, amount, description });
     if (purchase) {
-      await this.refreshData();
+      // WebSocket will auto-refresh
       return purchase;
     }
     throw new Error('Failed to create store purchase');
@@ -864,20 +944,20 @@ class Store {
       purchase.deducted = true;
       purchase.deductedInSalaryId = salaryId;
       await this.syncToAPI(`pendingStorePurchases/${purchaseId}`, 'PUT', { salaryId });
-      await this.refreshData();
+      // WebSocket will auto-refresh
     }
   }
 
   async deletePendingStorePurchase(id: string) {
     await this.syncToAPI(`pendingStorePurchases/${id}`, 'DELETE');
-    await this.refreshData();
+    // WebSocket will auto-refresh
   }
 
   // Announcements
   async addAnnouncement(title: string, body: string): Promise<Announcement> {
     const announcement = await this.syncToAPI<AnnouncementPayload>('announcements', 'POST', { title, body });
     if (announcement) {
-      await this.refreshData();
+      // WebSocket will auto-refresh
       return {
         ...announcement,
         createdAt: new Date(announcement.createdAt),
@@ -892,7 +972,7 @@ class Store {
     if (announcement && !announcement.readBy.includes(userId)) {
       announcement.readBy.push(userId);
       await this.syncToAPI(`announcements/${id}/read`, 'PUT', { userId });
-      await this.refreshData();
+      // WebSocket will auto-refresh
     }
   }
 
@@ -916,8 +996,154 @@ class Store {
     this.salaryHistory = [];
     this.pendingAdvances = [];
     this.pendingStorePurchases = [];
+    this.notifications = [];
     localStorage.clear();
     await this.refreshData();
+  }
+
+  // Notifications
+  async loadNotifications(userId: string): Promise<void> {
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      const url = apiBase ? `${apiBase}/api/notifications?userId=${userId}` : `/api/notifications?userId=${userId}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to load notifications: ${response.status}`);
+      }
+      this.notifications = await response.json();
+    } catch (error) {
+      console.error('Failed to load notifications:', error);
+    }
+  }
+
+  getNotifications(userId: string, unreadOnly = false): Notification[] {
+    let filtered = this.notifications.filter(n => n.targetUserId === userId);
+    if (unreadOnly) {
+      filtered = filtered.filter(n => !n.read);
+    }
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  getUnreadNotificationCount(userId: string): number {
+    return this.notifications.filter(n => n.targetUserId === userId && !n.read).length;
+  }
+
+  async markNotificationAsRead(notificationId: string): Promise<void> {
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      const url = apiBase ? `${apiBase}/api/notifications/${notificationId}/read` : `/api/notifications/${notificationId}/read`;
+      await fetch(url, { method: 'PUT' });
+      const notification = this.notifications.find(n => n.id === notificationId);
+      if (notification) {
+        notification.read = true;
+      }
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
+  }
+
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+      const url = apiBase ? `${apiBase}/api/notifications/read-all` : '/api/notifications/read-all';
+      await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      this.notifications.forEach(n => {
+        if (n.targetUserId === userId) {
+          n.read = true;
+        }
+      });
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error);
+    }
+  }
+
+  // Late Permissions
+  async requestLatePermission(userId: string, date: string, reason: string, expectedArrivalTime?: string): Promise<LatePermission> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const url = apiBase ? `${apiBase}/api/latePermissions` : '/api/latePermissions';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, date, reason, expectedArrivalTime }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to request late permission: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async getLatePermissions(userId: string, status?: string): Promise<LatePermission[]> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const statusParam = status ? `?status=${status}` : '';
+    const url = apiBase ? `${apiBase}/api/latePermissions/user/${userId}${statusParam}` : `/api/latePermissions/user/${userId}${statusParam}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get late permissions: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async getPendingLatePermissions(): Promise<LatePermission[]> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const url = apiBase ? `${apiBase}/api/latePermissions/pending` : '/api/latePermissions/pending';
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get pending permissions: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async updateLatePermissionStatus(id: string, status: 'approved' | 'rejected', approvedBy: string, rejectionReason?: string): Promise<LatePermission> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const url = apiBase ? `${apiBase}/api/latePermissions/${id}/status` : `/api/latePermissions/${id}/status`;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, approvedBy, rejectionReason }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to update permission status: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  // Late Approvals
+  async getPendingLateApprovals(): Promise<LateApproval[]> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const url = apiBase ? `${apiBase}/api/lateApprovals/pending` : '/api/lateApprovals/pending';
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get pending approvals: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async getUserLateApprovals(userId: string): Promise<LateApproval[]> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const url = apiBase ? `${apiBase}/api/lateApprovals/user/${userId}` : `/api/lateApprovals/user/${userId}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get user approvals: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async updateLateApprovalStatus(id: string, status: 'approved' | 'rejected', approvedBy: string, rejectionReason?: string, adminNotes?: string): Promise<LateApproval> {
+    const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3000');
+    const url = apiBase ? `${apiBase}/api/lateApprovals/${id}/status` : `/api/lateApprovals/${id}/status`;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, approvedBy, rejectionReason, adminNotes }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to update approval status: ${response.status}`);
+    }
+    return response.json();
   }
 }
 

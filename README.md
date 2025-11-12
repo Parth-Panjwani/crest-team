@@ -1,94 +1,262 @@
-# Employee Management System
+# Crest Team - Employee Management System
 
-Modern employee management system built with React, Vite, and MongoDB.
+Modern fullstack employee management system with real-time sync, built with React, Express, WebSocket, and MongoDB.
 
-## 🚀 Quick Start
+## 🚀 Features
 
-### Local Development
-
-**Run in TWO terminals:**
-
-**Terminal 1 - Frontend:**
-```bash
-npm run dev
-```
-Opens at: `http://localhost:5173`
-
-**Terminal 2 - API:**
-```bash
-npm run dev:api
-```
-Serves API at: `http://localhost:3000/api/*`
-
-### Default Login PINs
-
-- **Admin**: `1234` (Store Owner)
-- **Employee 1**: `5678` (Alice Johnson)  
-- **Employee 2**: `9012` (Bob Smith)
+- ✅ **Real-time Sync** - Live updates across all connected clients via WebSocket
+- ✅ **Attendance Tracking** - Check in/out, breaks, manual punches
+- ✅ **Leave Management** - Request and approve leaves
+- ✅ **Salary Management** - Track salaries, advances, and deductions
+- ✅ **Notes/Orders** - Create and manage notes with categories
+- ✅ **Staff Management** - Add, edit, and manage employees
+- ✅ **Announcements** - Broadcast announcements to all users
+- ✅ **Beautiful UI** - Modern, responsive design with Tailwind CSS and Shadcn UI
 
 ## 📦 Tech Stack
 
-- **Frontend**: React + Vite + TypeScript
-- **UI**: Tailwind CSS + Shadcn UI
-- **Backend**: Vercel Serverless Functions
-- **Database**: MongoDB
-- **Deployment**: Vercel
+### Frontend
+- React 18 + TypeScript
+- Vite
+- Tailwind CSS + Shadcn UI
+- React Router
+- TanStack Query
+- Framer Motion
+
+### Backend
+- Express.js
+- WebSocket (ws)
+- MongoDB
+- TypeScript
 
 ## 🏗️ Project Structure
 
 ```
-├── api/              # Serverless functions (MongoDB API)
-│   ├── [...path].ts  # Main API handler
-│   └── mongodb.ts    # MongoDB connection
-├── src/
-│   ├── components/   # React components
-│   ├── pages/        # Page components
-│   └── lib/          # Store & utilities
-└── public/           # Static assets
+crest-team/
+├── server/              # Backend server
+│   ├── src/
+│   │   ├── index.ts     # Server entry point
+│   │   ├── routes/      # API routes
+│   │   ├── models/      # Data models
+│   │   ├── websocket/   # WebSocket handlers
+│   │   └── config/      # Configuration
+│   └── package.json
+├── src/                 # Frontend React app
+│   ├── pages/           # Page components
+│   ├── components/      # UI components
+│   ├── lib/             # Store and utilities
+│   └── hooks/           # React hooks
+└── package.json
 ```
 
-## 🔧 Configuration
+## 🚀 Quick Start
 
-MongoDB connection is configured in `api/mongodb.ts`. For production, set `MONGODB_URI` environment variable in Vercel.
+### Prerequisites
 
-## 📝 Features
+- Node.js 20.x
+- MongoDB (local or Atlas)
 
-- ✅ Employee attendance tracking
-- ✅ Leave management
-- ✅ Salary & deductions tracking
-- ✅ Notes/Orders management
-- ✅ Real-time data sync
-- ✅ Multi-user support
+### 1. Install Dependencies
 
-## ⚙️ Backend & API Highlights
+```bash
+# Install frontend dependencies
+npm install
 
-- 🔐 **Single catch-all serverless handler** in [`api/[...path].ts`](api/%5B...path%5D.ts) routes every `/api/*` request, matches the local Express bridge, and centralizes typed validation for attendance, notes, salaries, leaves, and announcements.
-- 🗃️ **Typed MongoDB models** in [`api/mongodb.ts`](api/mongodb.ts) remove `any` usage, enforce schema-safe CRUD helpers, and transparently compress large note bodies while keeping legacy documents readable.
-- 🚀 **Bootstrap endpoint** (`/api/bootstrap`) batches the dashboard payload (users, attendance, notes, salaries, announcements, and more) so the client performs a single hydrated fetch on load.
+# Install backend dependencies
+cd server && npm install && cd ..
+```
 
-## 📈 Performance Improvements
+### 2. Configure Environment
 
-- 🪄 **Compressed note storage** dramatically reduces MongoDB document size and network transfer, with automatic backfill for legacy records.
-- 🧭 **Client-side data store** (`src/lib/store.ts`) keeps memoized maps, lazy background refreshes, and graceful error boundaries for a snappy UI.
-- 🧩 **Route-level code splitting** via `React.lazy` and manual Rollup chunking (see [`vite.config.ts`](vite.config.ts)) keeps the largest production bundle well under Vercel’s default 500&nbsp;kB budget.
+**Backend:**
+```bash
+cd server
+cp .env.example .env
+# Edit .env with your MongoDB connection string
+```
 
-## 📚 Additional Documentation
+**Frontend:**
+```bash
+cp .env.example .env
+# Edit .env if you need to change API URL (defaults to localhost:3000)
+```
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) – deep dive into the API router, MongoDB helpers, bootstrap flow, and data compression strategy.
+### 3. Run Development Servers
+
+**Option 1: Run both together (recommended)**
+```bash
+npm run dev:all
+```
+
+**Option 2: Run separately**
+```bash
+# Terminal 1 - Backend
+npm run dev:server
+
+# Terminal 2 - Frontend
+npm run dev
+```
+
+### 4. Access the Application
+
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3000
+- WebSocket: ws://localhost:3000
+
+### Default Login PINs
+
+- **Admin**: `1234` (Store Owner)
+- **Employee 1**: `5678` (Alice Johnson)
+- **Employee 2**: `9012` (Bob Smith)
+
+## 📝 API Endpoints
+
+All endpoints are under `/api`:
+
+### Authentication
+- `POST /api/auth/login` - Login with PIN
+
+### Users
+- `GET /api/users` - Get all users
+- `GET /api/users/:id` - Get user by ID
+- `POST /api/users` - Create user
+- `PUT /api/users/:id` - Update user
+- `DELETE /api/users/:id` - Delete user
+
+### Attendance
+- `POST /api/attendance/punch` - Record attendance punch
+- `GET /api/attendance/today/:userId` - Get today's attendance
+- `GET /api/attendance/history/:userId` - Get attendance history
+- `GET /api/attendance/all` - Get all attendance (admin)
+
+### Notes
+- `GET /api/notes` - Get all notes
+- `POST /api/notes` - Create note
+- `PUT /api/notes/:id` - Update note
+- `DELETE /api/notes/:id` - Delete note
+- `POST /api/notes/:id/restore` - Restore deleted note
+
+### Leaves
+- `GET /api/leaves` - Get all leaves
+- `POST /api/leaves` - Create leave request
+- `PUT /api/leaves/:id` - Update leave status
+- `DELETE /api/leaves/:id` - Delete leave
+
+### Salaries
+- `GET /api/salaries` - Get salaries
+- `POST /api/salaries` - Create salary record
+- `PUT /api/salaries/:id` - Update salary
+- `DELETE /api/salaries/:id` - Delete salary
+
+### Bootstrap
+- `GET /api/bootstrap` - Get all data for initial load
+
+## 🔌 WebSocket
+
+The application uses WebSocket for real-time updates. Connect to:
+
+```
+ws://localhost:3000?userId=USER_ID
+```
+
+### Message Types
+
+**Client → Server:**
+- `ping` - Keep connection alive
+
+**Server → Client:**
+- `pong` - Response to ping
+- `data-update` - Data has been updated
+  ```json
+  {
+    "type": "data-update",
+    "payload": {
+      "dataType": "attendance|note|leave|salary|user|announcement",
+      "data": { ... }
+    }
+  }
+  ```
 
 ## 🚢 Deployment
 
-### Prerequisites
-1. Set environment variables in Vercel:
-   - `MONGODB_URI` = Your MongoDB connection string
-   - `MONGODB_DB_NAME` = `crest-team` (optional)
+### Backend Deployment
 
-2. Whitelist IP in MongoDB Atlas:
-   - Go to Network Access → Add `0.0.0.0/0` (allows all IPs)
+The backend can be deployed to any Node.js hosting service (Railway, Render, Heroku, etc.):
 
-### Deploy
-Push to GitHub - Vercel auto-deploys on every push.
+1. Set environment variables:
+   - `MONGODB_URI` - Your MongoDB connection string
+   - `MONGODB_DB_NAME` - Database name (default: `crest-team`)
+   - `PORT` - Server port (default: 3000)
+   - `CLIENT_URL` - Frontend URL for CORS
 
-### Verify
-- Test API: `https://your-app.vercel.app/api/health` (should return `{"status":"ok"}`)
-- Test Login: `https://your-app.vercel.app/api/auth/login` (POST with `{"pin":"1234"}`)
+2. Build and start:
+   ```bash
+   cd server
+   npm run build
+   npm start
+   ```
+
+### Frontend Deployment
+
+Deploy to Vercel, Netlify, or any static hosting:
+
+1. Set environment variables:
+   - `VITE_API_URL` - Your backend API URL
+   - `VITE_WS_URL` - Your WebSocket URL (wss:// for production)
+
+2. Build:
+   ```bash
+   npm run build
+   ```
+
+3. Deploy the `dist/` folder
+
+## 🔧 Development
+
+### Scripts
+
+- `npm run dev` - Start frontend dev server
+- `npm run dev:server` - Start backend dev server
+- `npm run dev:all` - Start both frontend and backend
+- `npm run build` - Build frontend
+- `npm run build:server` - Build backend
+- `npm run build:all` - Build both
+
+### Project Structure
+
+- `/server` - Backend Express server with WebSocket
+- `/src` - Frontend React application
+- `/public` - Static assets
+
+## 📚 Documentation
+
+- [Backend README](server/README.md)
+- [Rebuild Guide](REBUILD_GUIDE.md)
+
+## 🐛 Troubleshooting
+
+### Backend not connecting to MongoDB
+
+- Check your `MONGODB_URI` in `server/.env`
+- Ensure MongoDB Atlas IP whitelist includes your IP (or `0.0.0.0/0` for testing)
+- Verify network connectivity
+
+### Frontend can't connect to backend
+
+- Ensure backend is running on port 3000
+- Check `VITE_API_URL` in `.env`
+- Verify CORS settings in backend
+
+### WebSocket not working
+
+- Check WebSocket URL in browser console
+- Verify backend WebSocket server is running
+- Check firewall/proxy settings
+
+## 📄 License
+
+Private project
+
+## 👥 Contributors
+
+Built for Crest Team

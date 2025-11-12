@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle, Bell, AlertTriangle } from 'lucide-react';
 import { Layout } from '@/components/Layout';
-import { store, Attendance as AttendanceType, User, STORE_TIMINGS } from '@/lib/store';
+import { store, Attendance as AttendanceType, User, STORE_TIMINGS, Punch } from '@/lib/store';
+import { formatMinutesToHours } from '@/utils/timeFormat';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,8 +30,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { useStore } from '@/hooks/useStore';
+import { RefreshButton } from '@/components/RefreshButton';
 
 export default function Attendance() {
+  // Subscribe to store updates to force re-renders when data changes
+  useStore();
+  
   const user = store.getCurrentUser();
   const { toast } = useToast();
   const isAdmin = user?.role === 'admin';
@@ -61,21 +67,88 @@ export default function Attendance() {
     });
   };
 
-  const handlePunch = (type: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END') => {
+  const handlePunch = async (type: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END', reason?: string) => {
     if (!user) return;
-    store.punch(user.id, type);
-    toast({ 
-      title: type === 'IN' ? 'Checked In' : type === 'OUT' ? 'Checked Out' : type === 'BREAK_START' ? 'Break Started' : 'Break Ended',
-      description: 'Attendance updated successfully'
-    });
+    try {
+      await store.punch(user.id, type, reason ? { reason } : undefined);
+      toast({ 
+        title: type === 'IN' ? 'Checked In' : type === 'OUT' ? 'Checked Out' : type === 'BREAK_START' ? 'Break Started' : 'Break Ended',
+        description: 'Attendance updated successfully'
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to record punch',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleBreakPunch = (type: 'BREAK_START' | 'BREAK_END') => {
+    setPendingBreakType(type);
+    setBreakReason('');
+    setBreakReasonDialogOpen(true);
+  };
+
+  const confirmBreakPunch = async () => {
+    if (!pendingBreakType) return;
+    // Only require reason for break start, not break end
+    if (pendingBreakType === 'BREAK_START' && !breakReason.trim()) {
+      toast({
+        title: 'Reason Required',
+        description: 'Please provide a reason for the break',
+        variant: 'destructive',
+      });
+      return;
+    }
+    await handlePunch(pendingBreakType, breakReason.trim() || undefined);
+    setBreakReasonDialogOpen(false);
+    setBreakReason('');
+    setPendingBreakType(null);
   };
 
   const AttendanceCard = ({ att, employee }: { att: AttendanceType; employee?: User }) => {
-    const checkIn = att.punches.find(p => p.type === 'IN');
-    const checkOut = att.punches.find(p => p.type === 'OUT');
+    // Process check-in/check-out pairs
+    const checkInOutPairs: Array<{
+      checkIn: Punch;
+      checkOut?: Punch;
+      duration?: number;
+    }> = [];
+    let currentCheckIn: Punch | null = null;
+    
+    for (const punch of att.punches) {
+      if (punch.type === 'IN') {
+        currentCheckIn = punch;
+      } else if (punch.type === 'OUT' && currentCheckIn) {
+        const checkOut = punch;
+        const duration = Math.round((new Date(checkOut.at).getTime() - new Date(currentCheckIn.at).getTime()) / 60000);
+        checkInOutPairs.push({
+          checkIn: currentCheckIn,
+          checkOut: checkOut,
+          duration
+        });
+        currentCheckIn = null;
+      }
+    }
+    
+    // If there's a check-in without a check-out, add it as the last pair
+    if (currentCheckIn) {
+      checkInOutPairs.push({
+        checkIn: currentCheckIn,
+        checkOut: undefined,
+        duration: undefined
+      });
+    }
     
     // Process breaks to get pairs of start/end with manual punch info
-    const breakPairs: Array<{ start: Date; end: Date; duration: number; manualStart?: boolean; manualEnd?: boolean; reason?: string }> = [];
+    const breakPairs: Array<{ 
+      start: Date; 
+      end: Date; 
+      duration: number; 
+      manualStart?: boolean; 
+      manualEnd?: boolean; 
+      reason?: string;
+    }> = [];
     let currentBreakStart: { date: Date; manual?: boolean; reason?: string } | null = null;
     
     for (const punch of att.punches) {
@@ -94,11 +167,14 @@ export default function Attendance() {
           duration,
           manualStart: currentBreakStart.manual,
           manualEnd: punch.manualPunch,
-          reason: currentBreakStart.reason || punch.reason
+          reason: currentBreakStart.reason // Only use break start reason
         });
         currentBreakStart = null;
       }
     }
+    
+    const lastPunch = att.punches[att.punches.length - 1];
+    const isComplete = lastPunch?.type === 'OUT';
 
     return (
       <motion.div
@@ -110,9 +186,9 @@ export default function Attendance() {
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                checkOut ? 'bg-muted/20' : 'bg-success/20'
+                isComplete ? 'bg-muted/20' : 'bg-success/20'
               }`}>
-                <Calendar className={`w-6 h-6 ${checkOut ? 'text-muted-foreground' : 'text-success'}`} />
+                <Calendar className={`w-6 h-6 ${isComplete ? 'text-muted-foreground' : 'text-success'}`} />
               </div>
               <div>
                 <h3 className="text-lg font-bold">
@@ -129,9 +205,9 @@ export default function Attendance() {
             </div>
           </div>
           <div className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 ${
-            checkOut ? 'bg-muted/20 text-muted-foreground' : 'bg-success/20 text-success'
+            isComplete ? 'bg-muted/20 text-muted-foreground' : 'bg-success/20 text-success'
           }`}>
-            {checkOut ? (
+            {isComplete ? (
               <>
                 <CheckCircle2 className="w-4 h-4" />
                 Complete
@@ -154,7 +230,45 @@ export default function Attendance() {
               <div>
                 <p className="text-xs text-muted-foreground font-medium">Work Time</p>
                 <p className="text-xl font-bold">
-                  {Math.floor(att.totals.workMin / 60)}h {att.totals.workMin % 60}m
+                  {(() => {
+                    // Calculate real-time work time if currently checked in
+                    const checkIn = att.punches.find(p => p.type === 'IN');
+                    const lastPunch = att.punches[att.punches.length - 1];
+                    const isCheckedIn = lastPunch && (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END');
+                    
+                    if (isCheckedIn && checkIn) {
+                      let workMs = 0;
+                      let lastIn: Date | null = null;
+                      let lastBreakStart: Date | null = null;
+                      const now = new Date().getTime();
+                      
+                      for (const punch of att.punches) {
+                        const punchTime = new Date(punch.at).getTime();
+                        if (punch.type === 'IN') {
+                          lastIn = new Date(punch.at);
+                        } else if (punch.type === 'OUT' && lastIn) {
+                          workMs += punchTime - lastIn.getTime();
+                          lastIn = null;
+                        } else if (punch.type === 'BREAK_START' && lastIn) {
+                          workMs += punchTime - lastIn.getTime();
+                          lastBreakStart = new Date(punch.at);
+                          lastIn = null;
+                        } else if (punch.type === 'BREAK_END' && lastBreakStart) {
+                          lastIn = new Date(punch.at);
+                          lastBreakStart = null;
+                        }
+                      }
+                      
+                      if (lastIn) {
+                        workMs += now - lastIn.getTime();
+                      }
+                      
+                      const workMin = Math.round(workMs / 60000);
+                      return `${Math.floor(workMin / 60)}h ${workMin % 60}m`;
+                    }
+                    
+                    return `${Math.floor(att.totals.workMin / 60)}h ${att.totals.workMin % 60}m`;
+                  })()}
                 </p>
               </div>
             </div>
@@ -175,14 +289,132 @@ export default function Attendance() {
         </div>
 
         <div className="space-y-3 pt-4 border-t border-glass-border">
-          {checkIn && (
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-success/20 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4 text-success" />
+          {checkInOutPairs.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                  <Clock className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">
+                    {checkInOutPairs.length} {checkInOutPairs.length === 1 ? 'Session' : 'Sessions'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Total: {Math.floor(att.totals.workMin / 60)}h {att.totals.workMin % 60}m</p>
+                </div>
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium">Check In</p>
-                <p className="text-xs text-muted-foreground">{formatTime(checkIn.at)}</p>
+              <div className="ml-11 space-y-2">
+                {checkInOutPairs.map((pair, index) => (
+                  <div key={index} className="glass-card rounded-xl p-3 border border-glass-border">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold text-primary">Session {index + 1}</p>
+                        {(pair.checkIn.manualPunch || pair.checkOut?.manualPunch) && (
+                          <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary text-[10px] border border-primary/30">
+                            Manual
+                          </span>
+                        )}
+                      </div>
+                      {pair.duration !== undefined && (
+                        <p className="text-xs font-bold">{Math.floor(pair.duration / 60)}h {pair.duration % 60}m</p>
+                      )}
+                    </div>
+                    
+                    {/* Check In */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        pair.checkIn.status === 'late' ? 'bg-destructive/20' :
+                        pair.checkIn.status === 'early' ? 'bg-warning/20' :
+                        'bg-success/20'
+                      }`}>
+                        {pair.checkIn.status === 'late' ? (
+                          <AlertTriangle className="w-3 h-3 text-destructive" />
+                        ) : pair.checkIn.status === 'early' ? (
+                          <Clock className="w-3 h-3 text-warning" />
+                        ) : (
+                          <CheckCircle2 className="w-3 h-3 text-success" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-medium">Check In</p>
+                          {pair.checkIn.status && (
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                              pair.checkIn.status === 'late' ? 'bg-destructive/20 text-destructive border border-destructive/30' :
+                              pair.checkIn.status === 'early' ? 'bg-warning/20 text-warning border border-warning/30' :
+                              'bg-success/20 text-success border border-success/30'
+                            }`}>
+                              {pair.checkIn.status === 'late' ? 'Late' : pair.checkIn.status === 'early' ? 'Early' : 'On Time'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatTime(pair.checkIn.at)}
+                          {pair.checkIn.statusMessage && ` - ${pair.checkIn.statusMessage}`}
+                        </p>
+                        {pair.checkIn.lateApprovalId && !pair.checkIn.lateApprovalStatus && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 mt-1 inline-block">
+                            Approval Required
+                          </span>
+                        )}
+                        {pair.checkIn.lateApprovalStatus === 'approved' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-success/20 text-success border border-success/30 mt-1 inline-block">
+                            ✓ Approved
+                          </span>
+                        )}
+                        {pair.checkIn.reason && (
+                          <p className="text-[10px] text-muted-foreground italic mt-0.5">Reason: {pair.checkIn.reason}</p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Check Out */}
+                    {pair.checkOut ? (
+                      <div className="flex items-center gap-2">
+                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          pair.checkOut.status === 'overtime' ? 'bg-primary/20' :
+                          pair.checkOut.status === 'early' ? 'bg-warning/20' :
+                          'bg-muted/20'
+                        }`}>
+                          {pair.checkOut.status === 'overtime' ? (
+                            <Clock className="w-3 h-3 text-primary" />
+                          ) : pair.checkOut.status === 'early' ? (
+                            <AlertTriangle className="w-3 h-3 text-warning" />
+                          ) : (
+                            <XCircle className="w-3 h-3 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-xs font-medium">Check Out</p>
+                            {pair.checkOut.status && (
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                pair.checkOut.status === 'overtime' ? 'bg-primary/20 text-primary border border-primary/30' :
+                                pair.checkOut.status === 'early' ? 'bg-warning/20 text-warning border border-warning/30' :
+                                'bg-success/20 text-success border border-success/30'
+                              }`}>
+                                {pair.checkOut.status === 'overtime' ? 'Overtime' : pair.checkOut.status === 'early' ? 'Early' : 'On Time'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            {formatTime(pair.checkOut.at)}
+                            {pair.checkOut.statusMessage && ` - ${pair.checkOut.statusMessage}`}
+                          </p>
+                          {pair.checkOut.reason && (
+                            <p className="text-[10px] text-muted-foreground italic mt-0.5">Reason: {pair.checkOut.reason}</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 bg-success/20">
+                          <Timer className="w-3 h-3 text-success" />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground italic">Still checked in</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -220,22 +452,12 @@ export default function Attendance() {
                       <span>{formatTime(breakPair.end)}</span>
                     </div>
                     {breakPair.reason && (
-                      <p className="text-xs text-muted-foreground italic mt-1">Reason: {breakPair.reason}</p>
+                      <p className="text-xs text-muted-foreground italic mt-1">
+                        Reason: {breakPair.reason}
+                      </p>
                     )}
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-          
-          {checkOut && (
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-muted/20 flex items-center justify-center">
-                <XCircle className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium">Check Out</p>
-                <p className="text-xs text-muted-foreground">{formatTime(checkOut.at)}</p>
               </div>
             </div>
           )}
@@ -268,6 +490,9 @@ export default function Attendance() {
     return { date: dateStr, time: timeStr };
   });
   const [manualPunchReason, setManualPunchReason] = useState('');
+  const [breakReasonDialogOpen, setBreakReasonDialogOpen] = useState(false);
+  const [breakReason, setBreakReason] = useState('');
+  const [pendingBreakType, setPendingBreakType] = useState<'BREAK_START' | 'BREAK_END' | null>(null);
 
   const handleManualPunch = async () => {
     if (!selectedEmployeeForPunch || !user) return;
@@ -311,9 +536,35 @@ export default function Attendance() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-8"
           >
-            <div className="mb-6">
-              <h1 className="text-2xl md:text-3xl font-bold mb-2">Staff Attendance</h1>
-              <p className="text-sm text-muted-foreground">Track and manage employee attendance</p>
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold mb-2">Staff Attendance</h1>
+                <p className="text-sm text-muted-foreground">Track and manage employee attendance</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <RefreshButton />
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    onClick={() => {
+                      setSelectedEmployeeForPunch(null);
+                      setManualPunchType('IN');
+                      setManualPunchTime(() => {
+                        const now = new Date();
+                        return {
+                          date: now.toISOString().split('T')[0],
+                          time: now.toTimeString().split(' ')[0].slice(0, 5),
+                        };
+                      });
+                      setManualPunchReason('');
+                      setIsManualPunchDialogOpen(true);
+                    }}
+                    className="gradient-primary shadow-md hover:shadow-lg"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Manual Punch
+                  </Button>
+                </motion.div>
+              </div>
             </div>
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'employees' | 'my-attendance')} className="w-full">
@@ -376,6 +627,80 @@ export default function Attendance() {
                   </div>
                 </div>
 
+                {/* Attendance Insights - Only when viewing all employees */}
+                {selectedUserId === 'all' && (
+                  <div className="glass-strong rounded-3xl p-6 border border-glass-border shadow-card">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <AlertCircle className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold">Attendance Insights</h2>
+                        <p className="text-xs text-muted-foreground">Overview of staff attendance patterns</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {(() => {
+                        const todayAttendances = allEmployees.map(emp => ({
+                          employee: emp,
+                          attendance: store.getTodayAttendance(emp.id)
+                        })).filter(item => item.attendance);
+
+                        const checkedInCount = todayAttendances.filter(item => {
+                          const lastPunch = item.attendance?.punches[item.attendance.punches.length - 1];
+                          return lastPunch?.type === 'IN' || lastPunch?.type === 'BREAK_END';
+                        }).length;
+
+                        const lateArrivals = todayAttendances.filter(item => {
+                          const checkIn = item.attendance?.punches.find(p => p.type === 'IN');
+                          return checkIn?.status === 'late';
+                        });
+
+                        const totalLateMinutes = lateArrivals.reduce((sum, item) => {
+                          const checkIn = item.attendance?.punches.find(p => p.type === 'IN');
+                          if (checkIn?.status === 'late' && checkIn.statusMessage) {
+                            // Extract minutes from status message or calculate
+                            const punchTime = new Date(checkIn.at);
+                            const storeOpen = new Date(punchTime);
+                            storeOpen.setHours(9, 30, 0, 0);
+                            const diffMs = punchTime.getTime() - storeOpen.getTime();
+                            const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+                            return sum + diffMinutes;
+                          }
+                          return sum;
+                        }, 0);
+
+                        const avgLateMinutes = lateArrivals.length > 0 ? totalLateMinutes / lateArrivals.length : 0;
+
+                        return (
+                          <>
+                            <div className="glass-card rounded-xl p-4 border border-glass-border">
+                              <p className="text-xs text-muted-foreground mb-1">Checked In Today</p>
+                              <p className="text-2xl font-bold">{checkedInCount} / {allEmployees.length}</p>
+                            </div>
+                            <div className="glass-card rounded-xl p-4 border border-glass-border">
+                              <p className="text-xs text-muted-foreground mb-1">Late Arrivals</p>
+                              <p className="text-2xl font-bold text-destructive">{lateArrivals.length}</p>
+                            </div>
+                            <div className="glass-card rounded-xl p-4 border border-glass-border">
+                              <p className="text-xs text-muted-foreground mb-1">Avg Late Time</p>
+                              <p className="text-2xl font-bold">{lateArrivals.length > 0 ? formatMinutesToHours(Math.round(avgLateMinutes)) : '0m'}</p>
+                            </div>
+                            <div className="glass-card rounded-xl p-4 border border-glass-border">
+                              <p className="text-xs text-muted-foreground mb-1">On Time Rate</p>
+                              <p className="text-2xl font-bold text-success">
+                                {todayAttendances.length > 0 
+                                  ? Math.round(((todayAttendances.length - lateArrivals.length) / todayAttendances.length) * 100)
+                                  : 0}%
+                              </p>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
                 {/* Staff Attendance Grid */}
                 {selectedUserId === 'all' ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -417,33 +742,152 @@ export default function Attendance() {
                                 </p>
                               </div>
                             </div>
-                            <div className={`w-3 h-3 rounded-full ${
-                              isCheckedIn ? 'bg-success' : 'bg-muted'
-                            }`} />
+                            {(() => {
+                              const checkIn = empAttendance?.punches.find(p => p.type === 'IN');
+                              const needsApproval = checkIn?.lateApprovalId && !checkIn.lateApprovalStatus;
+                              
+                              if (needsApproval) {
+                                return (
+                                  <div className="flex items-center gap-1.5">
+                                    <AlertCircle className="w-4 h-4 text-warning" />
+                                    <div className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+                                  </div>
+                                );
+                              } else if (isCheckedIn) {
+                                return (
+                                  <div className="flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-4 h-4 text-success" />
+                                    <div className="w-2 h-2 rounded-full bg-success" />
+                                  </div>
+                                );
+                              } else {
+                                return <div className="w-2 h-2 rounded-full bg-muted" />;
+                              }
+                            })()}
                           </div>
 
                           {empAttendance ? (
                             <>
-                              <div className="grid grid-cols-2 gap-3 mb-4">
-                                <div className="glass-card rounded-xl p-3 border border-glass-border">
-                                  <p className="text-xs text-muted-foreground mb-1">Work Time</p>
-                                  <p className="text-lg font-bold">
-                                    {Math.floor((empAttendance.totals.workMin || 0) / 60)}h {(empAttendance.totals.workMin || 0) % 60}m
-                                  </p>
-                                </div>
-                                <div className="glass-card rounded-xl p-3 border border-glass-border">
-                                  <p className="text-xs text-muted-foreground mb-1">Break Time</p>
-                                  <p className="text-lg font-bold">
-                                    {Math.floor((empAttendance.totals.breakMin || 0) / 60)}h {(empAttendance.totals.breakMin || 0) % 60}m
-                                  </p>
-                                </div>
-                              </div>
-                              {lastPunch && (
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <Clock className="w-3 h-3" />
-                                  <span>Last: {formatTime(lastPunch.at)}</span>
-                                </div>
-                              )}
+                              {(() => {
+                                const checkIn = empAttendance.punches.find(p => p.type === 'IN');
+                                const checkOut = empAttendance.punches.find(p => p.type === 'OUT');
+                                const isLate = checkIn?.status === 'late';
+                                
+                                // Calculate late minutes from 9:30 AM
+                                let lateMinutes = 0;
+                                if (checkIn && isLate) {
+                                  const punchTime = new Date(checkIn.at);
+                                  const storeOpen = new Date(punchTime);
+                                  storeOpen.setHours(9, 30, 0, 0);
+                                  const diffMs = punchTime.getTime() - storeOpen.getTime();
+                                  lateMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+                                }
+
+                                return (
+                                  <>
+                                    {checkIn && (
+                                      <div className={`mb-3 p-3 rounded-lg border ${
+                                        isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus
+                                          ? 'border-warning/50 bg-warning/5'
+                                          : isLate && checkIn.lateApprovalStatus === 'approved'
+                                          ? 'border-success/50 bg-success/5'
+                                          : 'border-glass-border bg-card'
+                                      }`}>
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs font-medium text-muted-foreground">Check In</span>
+                                            {isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus && (
+                                              <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold animate-pulse">
+                                                Action Required
+                                              </span>
+                                            )}
+                                          </div>
+                                          {isLate ? (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30 font-semibold">
+                                              {formatMinutesToHours(lateMinutes)} late
+                                            </span>
+                                          ) : checkIn.status === 'on-time' ? (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success border border-success/30">
+                                              On Time
+                                            </span>
+                                          ) : checkIn.status === 'early' ? (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30">
+                                              Early
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <p className="text-sm font-bold mb-1">{formatTime(checkIn.at)}</p>
+                                        {isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus && (
+                                          <div className="mt-2 p-2 rounded bg-warning/10 border border-warning/20">
+                                            <p className="text-xs font-medium text-warning flex items-center gap-1">
+                                              <AlertCircle className="w-3 h-3" />
+                                              Pending Approval
+                                            </p>
+                                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                                              Review in Pending Approvals section
+                                            </p>
+                                          </div>
+                                        )}
+                                        {isLate && checkIn.lateApprovalStatus === 'approved' && (
+                                          <div className="mt-2 p-2 rounded bg-success/10 border border-success/20">
+                                            <p className="text-xs font-medium text-success flex items-center gap-1">
+                                              <CheckCircle2 className="w-3 h-3" />
+                                              Approved
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className="grid grid-cols-2 gap-3 mb-4">
+                                      <div className="glass-card rounded-xl p-3 border border-glass-border">
+                                        <p className="text-xs text-muted-foreground mb-1">Work Time</p>
+                                        <p className="text-lg font-bold">
+                                          {Math.floor((empAttendance.totals.workMin || 0) / 60)}h {(empAttendance.totals.workMin || 0) % 60}m
+                                        </p>
+                                      </div>
+                                      <div className="glass-card rounded-xl p-3 border border-glass-border">
+                                        <p className="text-xs text-muted-foreground mb-1">Break Time</p>
+                                        <p className="text-lg font-bold">
+                                          {Math.floor((empAttendance.totals.breakMin || 0) / 60)}h {(empAttendance.totals.breakMin || 0) % 60}m
+                                        </p>
+                                      </div>
+                                    </div>
+                                    {checkOut && (
+                                      <div className={`mb-2 p-3 rounded-lg border ${
+                                        checkOut.status === 'overtime'
+                                          ? 'border-primary/50 bg-primary/5'
+                                          : checkOut.status === 'early'
+                                          ? 'border-warning/50 bg-warning/5'
+                                          : 'border-glass-border bg-card'
+                                      }`}>
+                                        <div className="flex items-center justify-between mb-1">
+                                          <span className="text-xs font-medium text-muted-foreground">Check Out</span>
+                                          {checkOut.status === 'overtime' && (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 font-semibold">
+                                              Overtime
+                                            </span>
+                                          )}
+                                          {checkOut.status === 'early' && (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold">
+                                              Early
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-sm font-bold">{formatTime(checkOut.at)}</p>
+                                        {checkOut.statusMessage && (
+                                          <p className="text-xs text-muted-foreground mt-1">{checkOut.statusMessage}</p>
+                                        )}
+                                      </div>
+                                    )}
+                                    {lastPunch && !checkOut && (
+                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <Clock className="w-3 h-3" />
+                                        <span>Last: {formatTime(lastPunch.at)}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </>
                           ) : (
                             <div className="text-center py-6">
@@ -573,7 +1017,7 @@ export default function Attendance() {
                     {myStatus === 'on-break' && (
                       <>
                         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                          <Button onClick={() => handlePunch('BREAK_END')} className="w-full h-14 gradient-primary shadow-md hover:shadow-lg">
+                          <Button onClick={() => handleBreakPunch('BREAK_END')} className="w-full h-14 gradient-primary shadow-md hover:shadow-lg">
                             <Clock className="mr-2 w-5 h-5" />
                             End Break
                           </Button>
@@ -657,17 +1101,18 @@ export default function Attendance() {
                 </div>
               </TabsContent>
             </Tabs>
+          </motion.div>
 
-            {/* Manual Punch Dialog */}
-            <Dialog open={isManualPunchDialogOpen} onOpenChange={setIsManualPunchDialogOpen}>
-              <DialogContent className="sm:max-w-[500px]">
-                <DialogHeader>
-                  <DialogTitle>Manual Punch</DialogTitle>
-                  <DialogDescription>
-                    Record a manual punch for an employee
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
+          {/* Manual Punch Dialog */}
+          <Dialog open={isManualPunchDialogOpen} onOpenChange={setIsManualPunchDialogOpen}>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>Manual Punch</DialogTitle>
+                <DialogDescription>
+                  Record a manual punch for an employee
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
                   <div>
                     <Label>Employee</Label>
                     <Select
@@ -755,22 +1200,63 @@ export default function Attendance() {
                       </div>
                     </div>
                   </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsManualPunchDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleManualPunch}
+                  disabled={!selectedEmployeeForPunch}
+                  className="gradient-primary"
+                >
+                  Record Punch
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Break Reason Dialog */}
+          <Dialog open={breakReasonDialogOpen} onOpenChange={setBreakReasonDialogOpen}>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>{pendingBreakType === 'BREAK_START' ? 'Start Break' : 'End Break'}</DialogTitle>
+                <DialogDescription>
+                  {pendingBreakType === 'BREAK_START' 
+                    ? 'Please provide a reason for this break'
+                    : 'Optionally provide a reason for ending the break'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div>
+                  <Label>Reason {pendingBreakType === 'BREAK_START' ? '*' : '(Optional)'}</Label>
+                  <Textarea
+                    placeholder={pendingBreakType === 'BREAK_START' ? 'e.g., Lunch break, Personal break, etc.' : 'Enter reason (optional)'}
+                    value={breakReason}
+                    onChange={(e) => setBreakReason(e.target.value)}
+                    rows={3}
+                    className="mt-2"
+                  />
                 </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsManualPunchDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleManualPunch}
-                    disabled={!selectedEmployeeForPunch}
-                    className="gradient-primary"
-                  >
-                    Record Punch
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </motion.div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setBreakReasonDialogOpen(false);
+                  setBreakReason('');
+                  setPendingBreakType(null);
+                }}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmBreakPunch}
+                  disabled={pendingBreakType === 'BREAK_START' && !breakReason.trim()}
+                  className="gradient-primary"
+                >
+                  {pendingBreakType === 'BREAK_START' ? 'Start Break' : 'End Break'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </Layout>
     );

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import { useAutoRefresh } from "@/hooks/useAutoRefresh"
+import { useStore } from "@/hooks/useStore"
 import {
   DollarSign,
   Plus,
@@ -38,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { RefreshButton } from '@/components/RefreshButton';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +52,9 @@ import {
 } from "@/components/ui/alert-dialog"
 
 export default function EmployeeFinance() {
+  // Subscribe to store updates to force re-renders when data changes
+  useStore();
+  
   const user = store.getCurrentUser()
   const navigate = useNavigate()
   const { toast } = useToast()
@@ -378,6 +383,11 @@ export default function EmployeeFinance() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
             <div>
               <h1 className="text-3xl font-bold mb-2">Employee Finance</h1>
+            </div>
+            <RefreshButton onRefresh={loadData} />
+          </div>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div>
               <p className="text-muted-foreground">
                 Track salary, advances, and purchases for each employee
               </p>

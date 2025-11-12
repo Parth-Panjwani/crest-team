@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
+import { useStore } from '@/hooks/useStore';
 import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Note } from '@/lib/store';
@@ -39,8 +40,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { RefreshButton } from '@/components/RefreshButton';
 
 export default function Notes() {
+  // Subscribe to store updates to force re-renders when data changes
+  useStore();
   const user = store.getCurrentUser();
   const isAdmin = user?.role === 'admin';
   const [notes, setNotes] = useState<Note[]>([]);
@@ -82,6 +86,11 @@ export default function Notes() {
 
   // Auto-refresh every 2 seconds
   useAutoRefresh(loadNotes, 2000);
+  
+  // Refresh notes when store updates (triggered by useStore hook)
+  useEffect(() => {
+    loadNotes();
+  }); // Runs on every render (which happens when store updates via useStore)
 
   const handleFormat = (command: string, value?: string) => {
     const textarea = textareaRef.current;
@@ -253,6 +262,11 @@ export default function Notes() {
             <div className="flex justify-between items-center">
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold">Notes</h1>
+              </div>
+              <RefreshButton onRefresh={loadNotes} />
+            </div>
+            <div className="flex justify-between items-center mt-4">
+              <div>
                 <p className="text-sm text-muted-foreground mt-1">Track and manage your notes</p>
               </div>
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
