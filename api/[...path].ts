@@ -39,7 +39,7 @@ function calculateTotals(punches: any[]) {
 
 async function isAdmin(userId: string): Promise<boolean> {
   const usersCollection = await getCollection('users');
-  const user = await usersCollection.findOne({ id: userId });
+  const user = await usersCollection.findOne({ id: userId }) as any;
   return user?.role === 'admin';
 }
 
@@ -68,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === 'POST') {
         const { pin } = req.body;
         const usersCollection = await getCollection('users');
-        const user = await usersCollection.findOne({ pin });
+        const user = await usersCollection.findOne({ pin }) as any;
         if (!user) {
           return res.status(401).json({ error: 'Invalid PIN' });
         }
@@ -82,7 +82,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (segments[1]) {
         const id = segments[1];
         if (req.method === 'GET') {
-          const user = await usersCollection.findOne({ id });
+          const user = await usersCollection.findOne({ id }) as any;
           if (!user) return res.status(404).json({ error: 'User not found' });
           return res.json(formatUser(user));
         }
@@ -92,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             { id },
             { $set: { name, role, pin, baseSalary: baseSalary || null } }
           );
-          const user = await usersCollection.findOne({ id });
+          const user = await usersCollection.findOne({ id }) as any;
           return res.json(formatUser(user));
         }
         if (req.method === 'DELETE') {
@@ -110,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       } else {
         if (req.method === 'GET') {
-          const users = await usersCollection.find({}).toArray();
+          const users = await usersCollection.find({}).toArray() as any[];
           return res.json(users.map(formatUser));
         }
         if (req.method === 'POST') {
@@ -133,13 +133,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         // If manual punch, verify admin
         if (manualPunch) {
-          const adminUser = await usersCollection.findOne({ id: punchedBy, role: 'admin' });
+          const usersCollection = await getCollection('users');
+          const adminUser = await usersCollection.findOne({ id: punchedBy, role: 'admin' }) as any;
           if (!adminUser) {
             return res.status(403).json({ error: 'Only admins can perform manual punches' });
           }
         }
         
-        let attendance = await attendanceCollection.findOne({ userId, date: punchDate });
+        let attendance = await attendanceCollection.findOne({ userId, date: punchDate }) as any;
         
         if (!attendance) {
           const id = uuidv4();
@@ -153,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await attendanceCollection.insertOne(attendance);
         }
         
-        const punches = attendance.punches || [];
+        const punches = (attendance.punches || []) as any[];
         const newPunch: any = { 
           at: punchTime.toISOString(), 
           type 
@@ -171,14 +172,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           { $set: { punches, totals } }
         );
         
-        const updated = await attendanceCollection.findOne({ id: attendance.id });
+        const updated = await attendanceCollection.findOne({ id: attendance.id }) as any;
         return res.json(formatAttendance(updated));
       }
 
       if (segments[1] === 'today' && segments[2]) {
         const userId = segments[2];
         const today = new Date().toISOString().split('T')[0];
-        const attendance = await attendanceCollection.findOne({ userId, date: today });
+        const attendance = await attendanceCollection.findOne({ userId, date: today }) as any;
         
         if (!attendance) {
           return res.json(null);
@@ -194,7 +195,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .find({ userId })
           .sort({ date: -1 })
           .limit(limit)
-          .toArray();
+          .toArray() as any[];
         
         return res.json(attendances.map(formatAttendance));
       }
@@ -203,7 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const attendances = await attendanceCollection
           .find({})
           .sort({ date: -1 })
-          .toArray();
+          .toArray() as any[];
         return res.json(attendances.map(formatAttendance));
       }
     }
@@ -502,9 +503,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (segments[1] && segments[2] === 'read' && req.method === 'PUT') {
         const id = segments[1];
         const { userId } = req.body;
-        const announcement = await announcementsCollection.findOne({ id });
+        const announcement = await announcementsCollection.findOne({ id }) as any;
         if (!announcement) return res.status(404).json({ error: 'Not found' });
-        const readBy = announcement.readBy || [];
+        const readBy = (announcement.readBy || []) as string[];
         if (!readBy.includes(userId)) {
           readBy.push(userId);
           await announcementsCollection.updateOne(
@@ -518,8 +519,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const announcements = await announcementsCollection
             .find({})
             .sort({ createdAt: -1 })
-            .toArray();
-          return res.json(announcements.map(ann => ({
+            .toArray() as any[];
+          return res.json(announcements.map((ann: any) => ({
             ...ann,
             createdAt: new Date(ann.createdAt),
             expiresAt: ann.expiresAt ? new Date(ann.expiresAt) : null,
