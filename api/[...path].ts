@@ -8,7 +8,7 @@ import {
   formatSalary,
   compressNoteText,
   formatAnnouncement,
-} from './mongodb';
+} from './mongodb.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { Filter } from 'mongodb';
 import type {
