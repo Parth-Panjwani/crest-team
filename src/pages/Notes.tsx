@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { useStore } from '@/hooks/useStore';
-import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter } from 'lucide-react';
+import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter, Package, PackageX, PackageCheck, ChevronRight } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Note } from '@/lib/store';
 import { Button } from '@/components/ui/button';
@@ -60,6 +60,7 @@ export default function Notes() {
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [noteText, setNoteText] = useState('');
   const [noteCategory, setNoteCategory] = useState<'order' | 'general' | 'reminder'>('general');
+  const [noteSubCategory, setNoteSubCategory] = useState<'refill-stock' | 'remove-from-stock' | 'out-of-stock' | undefined>(undefined);
   const [noteAdminOnly, setNoteAdminOnly] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -80,17 +81,16 @@ export default function Notes() {
     setDeletedNotes(store.getDeletedNotes(user?.id));
   }, [filter, showAdminOnly, categoryFilter, user?.id]);
 
+  // Get current notes count to detect store changes
+  const notesCount = store.getNotes().length;
+  const deletedNotesCount = store.getDeletedNotes(user?.id).length;
+
   useEffect(() => {
     loadNotes();
-  }, [loadNotes]);
+  }, [loadNotes, notesCount, deletedNotesCount]); // Re-run when store data changes
 
   // Auto-refresh every 2 seconds
   useAutoRefresh(loadNotes, 2000);
-  
-  // Refresh notes when store updates (triggered by useStore hook)
-  useEffect(() => {
-    loadNotes();
-  }); // Runs on every render (which happens when store updates via useStore)
 
   const handleFormat = (command: string, value?: string) => {
     const textarea = textareaRef.current;
@@ -166,16 +166,18 @@ export default function Notes() {
       store.updateNote(editingNote.id, { 
         text: noteText,
         category: noteCategory,
+        subCategory: noteCategory === 'reminder' ? noteSubCategory : undefined,
         adminOnly: noteAdminOnly
       });
       toast({ title: 'Note Updated', description: 'Changes saved successfully' });
     } else {
-      store.addNote(noteText, user?.id || '', noteCategory, noteAdminOnly);
+      store.addNote(noteText, user?.id || '', noteCategory, noteAdminOnly, noteCategory === 'reminder' ? noteSubCategory : undefined);
       toast({ title: 'Note Created', description: 'New note added' });
     }
 
     setNoteText('');
     setNoteCategory('general');
+    setNoteSubCategory(undefined);
     setNoteAdminOnly(false);
     setEditingNote(null);
     setShowEditor(false);
@@ -186,6 +188,7 @@ export default function Notes() {
     setEditingNote(note);
     setNoteText(note.text);
     setNoteCategory(note.category);
+    setNoteSubCategory(note.subCategory);
     setNoteAdminOnly(note.adminOnly);
     setShowEditor(true);
   };
@@ -238,7 +241,19 @@ export default function Notes() {
     note.text.toLowerCase().includes(search.toLowerCase())
   );
 
-  const getCategoryColor = (category: string) => {
+  const getCategoryColor = (category: string, subCategory?: string) => {
+    if (category === 'reminder' && subCategory) {
+      switch (subCategory) {
+        case 'refill-stock':
+          return 'bg-primary/20 text-primary border-primary/30';
+        case 'remove-from-stock':
+          return 'bg-warning/20 text-warning border-warning/30';
+        case 'out-of-stock':
+          return 'bg-destructive/20 text-destructive border-destructive/30';
+        default:
+          return 'bg-warning/20 text-warning border-warning/30';
+      }
+    }
     switch (category) {
       case 'order':
         return 'bg-primary/20 text-primary border-primary/30';
@@ -246,6 +261,32 @@ export default function Notes() {
         return 'bg-warning/20 text-warning border-warning/30';
       default:
         return 'bg-secondary text-secondary-foreground border-border';
+    }
+  };
+
+  const getSubCategoryLabel = (subCategory?: string) => {
+    switch (subCategory) {
+      case 'refill-stock':
+        return 'Refill Stock';
+      case 'remove-from-stock':
+        return 'Remove from Stock';
+      case 'out-of-stock':
+        return 'Out of Stock';
+      default:
+        return null;
+    }
+  };
+
+  const getSubCategoryIcon = (subCategory?: string) => {
+    switch (subCategory) {
+      case 'refill-stock':
+        return <PackageCheck className="w-3 h-3" />;
+      case 'remove-from-stock':
+        return <PackageX className="w-3 h-3" />;
+      case 'out-of-stock':
+        return <Package className="w-3 h-3" />;
+      default:
+        return null;
     }
   };
 
@@ -275,6 +316,7 @@ export default function Notes() {
                     setEditingNote(null);
                     setNoteText('');
                     setNoteCategory('general');
+                    setNoteSubCategory(undefined);
                     setNoteAdminOnly(false);
                     setShowEditor(true);
                   }}
@@ -458,9 +500,17 @@ export default function Notes() {
                           }`}>
                             {note.status === 'done' ? 'Done' : 'Pending'}
                           </span>
-                          <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category)}`}>
-                            {note.category.charAt(0).toUpperCase() + note.category.slice(1)}
-                          </span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category, note.subCategory)} flex items-center gap-1`}>
+                              {note.category === 'reminder' && note.subCategory && getSubCategoryIcon(note.subCategory)}
+                              {note.category === 'reminder' && note.subCategory 
+                                ? getSubCategoryLabel(note.subCategory)
+                                : note.category.charAt(0).toUpperCase() + note.category.slice(1)}
+                            </span>
+                            {note.category === 'reminder' && !note.subCategory && (
+                              <span className="text-xs text-muted-foreground italic">(No type selected)</span>
+                            )}
+                          </div>
                           {note.adminOnly && (
                             <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/20 text-primary border border-primary/30">
                               Admin Only
@@ -579,8 +629,11 @@ export default function Notes() {
                       >
                         <div className="flex justify-between items-start mb-3">
                           <div className="flex items-center gap-3 flex-wrap">
-                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category)}`}>
-                              {note.category.charAt(0).toUpperCase() + note.category.slice(1)}
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(note.category, note.subCategory)} flex items-center gap-1`}>
+                              {note.category === 'reminder' && note.subCategory && getSubCategoryIcon(note.subCategory)}
+                              {note.category === 'reminder' && note.subCategory 
+                                ? getSubCategoryLabel(note.subCategory)
+                                : note.category.charAt(0).toUpperCase() + note.category.slice(1)}
                             </span>
                             {note.adminOnly && (
                               <span className="text-xs font-semibold px-2 py-1 rounded-full border bg-primary/20 text-primary border-primary/30">
@@ -645,30 +698,137 @@ export default function Notes() {
 
         {/* Editor Dialog */}
         <Dialog open={showEditor} onOpenChange={setShowEditor}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-visible">
             <DialogHeader>
               <DialogTitle>{editingNote ? 'Edit Note' : 'New Note'}</DialogTitle>
               <DialogDescription>
                 Create a note with formatting options. Use • for bullet points or numbers for numbered lists.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4 overflow-visible">
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select
                   value={noteCategory}
-                  onValueChange={(value: 'order' | 'general' | 'reminder') => setNoteCategory(value)}
+                  onValueChange={(value: 'order' | 'general' | 'reminder') => {
+                    setNoteCategory(value);
+                    // Reset subCategory when changing category
+                    if (value !== 'reminder') {
+                      setNoteSubCategory(undefined);
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="order">Order</SelectItem>
-                    <SelectItem value="general">General</SelectItem>
-                    <SelectItem value="reminder">Reminder</SelectItem>
+                    <SelectItem value="order">
+                      <div className="flex items-center gap-2">
+                        <ListOrdered className="w-4 h-4" />
+                        <span>Order</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="general">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4" />
+                        <span>General</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="reminder">
+                      <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4" />
+                        <span>Reminder</span>
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Sub-Category Selector (only for Reminder) */}
+              {noteCategory === 'reminder' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="space-y-2 overflow-visible"
+                >
+                  <Label className="flex items-center gap-2">
+                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    <span>Reminder Type</span>
+                  </Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 overflow-visible">
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setNoteSubCategory('refill-stock')}
+                      className={`p-3 rounded-xl border-2 transition-all text-left relative ${
+                        noteSubCategory === 'refill-stock'
+                          ? 'border-primary bg-primary/10 shadow-lg z-10'
+                          : 'border-glass-border bg-card hover:border-primary/30 hover:shadow-md'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <PackageCheck className={`w-5 h-5 ${
+                          noteSubCategory === 'refill-stock' ? 'text-primary' : 'text-muted-foreground'
+                        }`} />
+                        <span className={`font-semibold text-sm ${
+                          noteSubCategory === 'refill-stock' ? 'text-primary' : 'text-foreground'
+                        }`}>
+                          Refill Stock
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Items need to be restocked</p>
+                    </motion.button>
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setNoteSubCategory('remove-from-stock')}
+                      className={`p-3 rounded-xl border-2 transition-all text-left relative ${
+                        noteSubCategory === 'remove-from-stock'
+                          ? 'border-warning bg-warning/10 shadow-lg z-10'
+                          : 'border-glass-border bg-card hover:border-warning/30 hover:shadow-md'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <PackageX className={`w-5 h-5 ${
+                          noteSubCategory === 'remove-from-stock' ? 'text-warning' : 'text-muted-foreground'
+                        }`} />
+                        <span className={`font-semibold text-sm ${
+                          noteSubCategory === 'remove-from-stock' ? 'text-warning' : 'text-foreground'
+                        }`}>
+                          Remove from Stock
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Items to be removed</p>
+                    </motion.button>
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setNoteSubCategory('out-of-stock')}
+                      className={`p-3 rounded-xl border-2 transition-all text-left relative ${
+                        noteSubCategory === 'out-of-stock'
+                          ? 'border-destructive bg-destructive/10 shadow-lg z-10'
+                          : 'border-glass-border bg-card hover:border-destructive/30 hover:shadow-md'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Package className={`w-5 h-5 ${
+                          noteSubCategory === 'out-of-stock' ? 'text-destructive' : 'text-muted-foreground'
+                        }`} />
+                        <span className={`font-semibold text-sm ${
+                          noteSubCategory === 'out-of-stock' ? 'text-destructive' : 'text-foreground'
+                        }`}>
+                          Out of Stock
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Items currently unavailable</p>
+                    </motion.button>
+                  </div>
+                </motion.div>
+              )}
 
               {isAdmin && (
                 <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Plus, Edit, Trash2, Users, Shield, User, History, X } from 'lucide-react';
@@ -71,17 +71,19 @@ export default function Staff() {
     loadStaff();
   }, [user, navigate]);
   
-  // Refresh staff when store updates (triggered by useStore hook)
+  const loadStaff = useCallback(() => {
+    const allUsers = store.getAllUsers();
+    setStaff(allUsers);
+  }, []);
+
+  // Get current users count to detect store changes
+  const usersCount = store.getAllUsers().length;
+
   useEffect(() => {
     if (user?.role === 'admin') {
       loadStaff();
     }
-  }); // Runs on every render (which happens when store updates via useStore)
-
-  const loadStaff = () => {
-    const allUsers = store.getAllUsers();
-    setStaff(allUsers);
-  };
+  }, [user?.role, loadStaff, usersCount]); // Re-run when store data changes
 
   const handleCreate = async () => {
     setFormData({ name: '', pin: '', role: 'employee', baseSalary: '', salaryChangeReason: '' });

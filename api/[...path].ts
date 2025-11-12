@@ -421,6 +421,7 @@ const handleNotes: ApiHandler = async (req, res, context) => {
       const text = getString(body.text);
       const createdBy = getString(body.createdBy);
       const category = getString(body.category);
+      const subCategory = getString(body.subCategory) as 'refill-stock' | 'remove-from-stock' | 'out-of-stock' | undefined;
       const adminOnly = getBoolean(body.adminOnly) ?? false;
 
       if (!text || !createdBy) {
@@ -438,6 +439,7 @@ const handleNotes: ApiHandler = async (req, res, context) => {
         createdAt: now,
         status: 'pending',
         category: category || 'general',
+        subCategory: category === 'reminder' ? subCategory : undefined,
         adminOnly,
       };
 
@@ -454,6 +456,7 @@ const handleNotes: ApiHandler = async (req, res, context) => {
     const text = getString(body.text);
     const status = getString(body.status);
     const category = getString(body.category);
+    const subCategory = getString(body.subCategory) as 'refill-stock' | 'remove-from-stock' | 'out-of-stock' | undefined;
     const adminOnly = getBoolean(body.adminOnly);
     const update: Partial<NoteDocument> = {};
 
@@ -462,6 +465,15 @@ const handleNotes: ApiHandler = async (req, res, context) => {
     }
     if (category !== undefined) {
       update.category = category;
+      // Only set subCategory if category is reminder
+      if (category === 'reminder') {
+        update.subCategory = subCategory;
+      } else {
+        update.subCategory = undefined;
+      }
+    } else if (subCategory !== undefined) {
+      // If only subCategory is being updated (and category is already reminder)
+      update.subCategory = subCategory;
     }
     if (adminOnly !== undefined) {
       update.adminOnly = adminOnly;

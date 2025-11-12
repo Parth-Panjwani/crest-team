@@ -51,6 +51,7 @@ export interface Note {
   createdAt: Date;
   status: 'pending' | 'done';
   category: 'order' | 'general' | 'reminder';
+  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock'; // Only for reminder category
   adminOnly: boolean;
   completedBy?: string;
   completedAt?: Date;
@@ -201,6 +202,7 @@ interface NotePayload extends Omit<Note, 'createdAt' | 'completedAt' | 'deletedA
   createdAt: string;
   completedAt?: string | null;
   deletedAt?: string | null;
+  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock';
 }
 
 interface SalaryPayload extends Omit<Salary, 'advances' | 'storePurchases' | 'paid'> {
@@ -565,7 +567,8 @@ class Store {
       this.users.push(user);
       this.users.sort((a, b) => a.name.localeCompare(b.name));
       this.usersById.set(user.id, user);
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
       return user;
     }
     throw new Error('Failed to create user');
@@ -604,7 +607,8 @@ class Store {
         this.usersById.set(id, user);
       }
       
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
       return user;
     }
     return null;
@@ -618,7 +622,8 @@ class Store {
     await this.syncToAPI(`users/${id}`, 'DELETE');
     this.users = this.users.filter(u => u.id !== id);
     this.usersById.delete(id);
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
     return true;
   }
 
@@ -642,9 +647,8 @@ class Store {
       'DELETE',
       { adminId }
     );
-    // Clear local attendance data
-    this.attendance = [];
-    this.notifyListeners();
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
     return result;
   }
 
@@ -693,7 +697,8 @@ class Store {
       reason: options?.reason,
       customTime: options?.customTime?.toISOString()
     });
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
     return {
       ...result,
       punches: result.punches.map(punch => ({ ...punch, at: new Date(punch.at) })),
@@ -744,10 +749,11 @@ class Store {
   }
 
   // Notes
-  async addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false): Promise<Note> {
-    const note = await this.syncToAPI<NotePayload>('notes', 'POST', { text, createdBy: userId, category, adminOnly });
+  async addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false, subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock'): Promise<Note> {
+    const note = await this.syncToAPI<NotePayload>('notes', 'POST', { text, createdBy: userId, category, adminOnly, subCategory });
     if (note) {
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
       return {
         ...note,
         createdAt: new Date(note.createdAt),
@@ -761,7 +767,8 @@ class Store {
     if (note) {
       Object.assign(note, updates);
       await this.syncToAPI(`notes/${id}`, 'PUT', updates);
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
     }
   }
 
@@ -769,7 +776,8 @@ class Store {
     const note = this.notes.find(n => n.id === id);
     if (note) {
       await this.syncToAPI(`notes/${id}`, 'DELETE', { deletedBy });
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
     }
   }
 
@@ -780,13 +788,15 @@ class Store {
       note.deletedAt = undefined;
       note.deletedBy = undefined;
       await this.syncToAPI(`notes/${id}/restore`, 'POST', {});
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
     }
   }
 
   async permanentDeleteNote(id: string) {
     await this.syncToAPI(`notes/${id}/permanent`, 'DELETE', {});
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
   }
 
   getNotes(status?: 'pending' | 'done', showAdminOnly: boolean = false, currentUserId?: string): Note[] {
@@ -821,15 +831,17 @@ class Store {
   async applyLeave(userId: string, date: string, type: 'full' | 'half', reason: string): Promise<Leave> {
     const leave = await this.syncToAPI<Leave>('leaves', 'POST', { userId, date, type, reason });
     if (leave) {
-      // WebSocket will auto-refresh
-    return leave;
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
+      return leave;
     }
     throw new Error('Failed to create leave');
   }
 
   async updateLeaveStatus(id: string, status: 'approved' | 'rejected', salaryDeduction?: boolean, approvedBy?: string) {
     await this.syncToAPI(`leaves/${id}`, 'PUT', { status, salaryDeduction, approvedBy });
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
   }
 
   getUserLeaves(userId: string): Leave[] {
@@ -879,7 +891,8 @@ class Store {
       });
     }
     
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
   }
 
   getSalariesForMonth(month: string): Salary[] {
@@ -898,14 +911,16 @@ class Store {
 
   async deleteSalary(id: string) {
     await this.syncToAPI(`salaries/${id}`, 'DELETE');
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
   }
 
   // Pending Advances
   async addPendingAdvance(userId: string, date: string, amount: number, description: string): Promise<PendingAdvance> {
     const advance = await this.syncToAPI<PendingAdvance>('pendingAdvances', 'POST', { userId, date, amount, description });
     if (advance) {
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
       return advance;
     }
     throw new Error('Failed to create advance');
@@ -926,20 +941,23 @@ class Store {
       advance.deducted = true;
       advance.deductedInSalaryId = salaryId;
       await this.syncToAPI(`pendingAdvances/${advanceId}`, 'PUT', { salaryId });
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
     }
   }
 
   async deletePendingAdvance(id: string) {
     await this.syncToAPI(`pendingAdvances/${id}`, 'DELETE');
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
   }
 
   // Pending Store Purchases
   async addPendingStorePurchase(userId: string, date: string, amount: number, description: string): Promise<PendingStorePurchase> {
     const purchase = await this.syncToAPI<PendingStorePurchase>('pendingStorePurchases', 'POST', { userId, date, amount, description });
     if (purchase) {
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
       return purchase;
     }
     throw new Error('Failed to create store purchase');
@@ -960,20 +978,23 @@ class Store {
       purchase.deducted = true;
       purchase.deductedInSalaryId = salaryId;
       await this.syncToAPI(`pendingStorePurchases/${purchaseId}`, 'PUT', { salaryId });
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
     }
   }
 
   async deletePendingStorePurchase(id: string) {
     await this.syncToAPI(`pendingStorePurchases/${id}`, 'DELETE');
-    // WebSocket will auto-refresh
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
   }
 
   // Announcements
   async addAnnouncement(title: string, body: string): Promise<Announcement> {
     const announcement = await this.syncToAPI<AnnouncementPayload>('announcements', 'POST', { title, body });
     if (announcement) {
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
       return {
         ...announcement,
         createdAt: new Date(announcement.createdAt),
@@ -988,7 +1009,8 @@ class Store {
     if (announcement && !announcement.readBy.includes(userId)) {
       announcement.readBy.push(userId);
       await this.syncToAPI(`announcements/${id}/read`, 'PUT', { userId });
-      // WebSocket will auto-refresh
+      // Auto-refresh after CRUD operation
+      await this.refreshData();
     }
   }
 
@@ -1124,7 +1146,10 @@ class Store {
     if (!response.ok) {
       throw new Error(`Failed to update permission status: ${response.status}`);
     }
-    return response.json();
+    const result = await response.json();
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
+    return result;
   }
 
   // Late Approvals
@@ -1159,7 +1184,10 @@ class Store {
     if (!response.ok) {
       throw new Error(`Failed to update approval status: ${response.status}`);
     }
-    return response.json();
+    const result = await response.json();
+    // Auto-refresh after CRUD operation
+    await this.refreshData();
+    return result;
   }
 }
 

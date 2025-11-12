@@ -45,14 +45,12 @@ export default function Leave() {
     }
   }, [isAdmin, user?.id]);
 
+  // Get current leaves count to detect store changes
+  const leavesCount = isAdmin ? store.getPendingLeaves().length : store.getUserLeaves(user?.id || '').length;
+
   useEffect(() => {
     loadLeaves();
-  }, [loadLeaves]);
-  
-  // Refresh leaves when store updates (triggered by useStore hook)
-  useEffect(() => {
-    loadLeaves();
-  }); // Runs on every render (which happens when store updates via useStore)
+  }, [loadLeaves, leavesCount]); // Re-run when store data changes
 
   const handleSubmit = () => {
     if (!formData.date || !formData.reason.trim()) {

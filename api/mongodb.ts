@@ -48,6 +48,7 @@ export interface NoteDocument {
   createdAt: string;
   status: string;
   category?: string;
+  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock'; // Only for reminder category
   adminOnly?: boolean;
   completedBy?: string;
   completedAt?: string;
@@ -155,6 +156,7 @@ export interface FormattedNote {
   createdAt: Date;
   status: string;
   category?: string;
+  subCategory?: 'refill-stock' | 'remove-from-stock' | 'out-of-stock';
   adminOnly: boolean;
   completedBy?: string;
   completedAt?: Date;
@@ -557,6 +559,7 @@ export function formatNote(doc: NoteDocument | WithId<NoteDocument>): FormattedN
     createdAt: new Date(doc.createdAt),
     status: doc.status,
     category: doc.category,
+    subCategory: doc.subCategory,
     adminOnly: doc.adminOnly ?? false,
     completedBy: doc.completedBy,
     completedAt: doc.completedAt ? new Date(doc.completedAt) : undefined,
