@@ -149,6 +149,7 @@ function initializeFirebase(): void {
   // Check if Firebase is already initialized
   try {
     firebaseAdmin = admin.app();
+    console.log('✅ Firebase Admin SDK already initialized');
     return;
   } catch {
     // App doesn't exist yet, continue to initialize
@@ -158,9 +159,19 @@ function initializeFirebase(): void {
     return;
   }
 
-  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').trim();
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  // Get raw env vars first for debugging
+  const rawProjectId = process.env.FIREBASE_PROJECT_ID;
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+  const rawClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+
+  console.log('🔍 Firebase Environment Variables Check:');
+  console.log('  FIREBASE_PROJECT_ID:', rawProjectId ? `✅ Set (${rawProjectId.length} chars)` : '❌ Missing');
+  console.log('  FIREBASE_CLIENT_EMAIL:', rawClientEmail ? `✅ Set (${rawClientEmail.length} chars)` : '❌ Missing');
+  console.log('  FIREBASE_PRIVATE_KEY:', rawPrivateKey ? `✅ Set (${rawPrivateKey.length} chars, starts with: ${rawPrivateKey.substring(0, 30)}...)` : '❌ Missing');
+
+  const projectId = rawProjectId?.trim();
+  const privateKey = rawPrivateKey?.replace(/\\n/g, '\n').trim();
+  const clientEmail = rawClientEmail?.trim();
 
   if (!projectId || !privateKey || !clientEmail) {
     console.warn('⚠️  Firebase credentials not configured. Push notifications will be disabled.');
@@ -168,7 +179,16 @@ function initializeFirebase(): void {
       hasProjectId: !!projectId,
       hasPrivateKey: !!privateKey,
       hasClientEmail: !!clientEmail,
+      projectIdLength: projectId?.length || 0,
+      privateKeyLength: privateKey?.length || 0,
+      clientEmailLength: clientEmail?.length || 0,
     });
+    return;
+  }
+
+  // Validate private key format
+  if (!privateKey.includes('BEGIN PRIVATE KEY') || !privateKey.includes('END PRIVATE KEY')) {
+    console.error('❌ Invalid private key format - missing BEGIN/END markers');
     return;
   }
 
@@ -181,6 +201,8 @@ function initializeFirebase(): void {
       }),
     });
     console.log('✅ Firebase Admin SDK initialized successfully');
+    console.log('  Project ID:', projectId);
+    console.log('  Client Email:', clientEmail);
   } catch (error) {
     console.error('❌ Failed to initialize Firebase Admin SDK:', error);
     if (error instanceof Error) {
@@ -190,6 +212,7 @@ function initializeFirebase(): void {
         stack: error.stack,
       });
     }
+    firebaseAdmin = null;
   }
 }
 
@@ -273,6 +296,33 @@ const handleHealth: ApiHandler = (_, res, context) => {
 
   if (context.segments[0] === 'health' && context.method === 'GET') {
     return json(res, 200, { status: 'ok', timestamp: new Date().toISOString() });
+  }
+
+  // Firebase test endpoint
+  if (context.segments[0] === 'test-firebase' && context.method === 'GET') {
+    initializeFirebase();
+    const rawProjectId = process.env.FIREBASE_PROJECT_ID;
+    const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+    const rawClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    
+    const projectId = rawProjectId?.trim();
+    const privateKey = rawPrivateKey?.replace(/\\n/g, '\n').trim();
+    const clientEmail = rawClientEmail?.trim();
+    
+    const hasValidKey = privateKey && privateKey.includes('BEGIN PRIVATE KEY') && privateKey.includes('END PRIVATE KEY');
+    
+    return json(res, 200, {
+      configured: !!(projectId && privateKey && clientEmail),
+      hasProjectId: !!projectId,
+      hasClientEmail: !!clientEmail,
+      hasPrivateKey: !!privateKey,
+      privateKeyValid: hasValidKey,
+      privateKeyLength: privateKey?.length || 0,
+      firebaseInitialized: !!firebaseAdmin,
+      projectId: projectId || null,
+      clientEmail: clientEmail || null,
+      // Don't expose private key in response!
+    });
   }
 
   return false;
