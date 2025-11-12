@@ -13,7 +13,7 @@ export interface User {
   name: string;
   role: Role;
   pin: string;
-  baseSalary?: number;
+  baseSalary?: number | null;
   customBreakTimes?: CustomBreakTime[]; // Custom break times for this employee
 }
 
@@ -133,6 +133,67 @@ export interface Announcement {
   readBy: string[];
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+interface PunchPayload extends Omit<Punch, 'at'> {
+  at: string;
+}
+
+interface AttendancePayload extends Omit<Attendance, 'punches'> {
+  punches: PunchPayload[];
+}
+
+interface NotePayload extends Omit<Note, 'createdAt' | 'completedAt' | 'deletedAt'> {
+  createdAt: string;
+  completedAt?: string | null;
+  deletedAt?: string | null;
+}
+
+interface SalaryPayload extends Omit<Salary, 'advances' | 'storePurchases' | 'paid'> {
+  advances?: Advance[];
+  storePurchases?: StorePurchase[];
+  paid?: number | boolean;
+  paidDate?: string | null;
+}
+
+interface AnnouncementPayload extends Omit<Announcement, 'createdAt' | 'expiresAt'> {
+  createdAt: string;
+  expiresAt?: string | null;
+}
+
+interface BootstrapResponse {
+  users?: User[];
+  notes?: NotePayload[];
+  leaves?: Leave[];
+  salaries?: SalaryPayload[];
+  attendance?: AttendancePayload[];
+  salaryHistory?: SalaryHistory[];
+  pendingAdvances?: PendingAdvance[];
+  pendingStorePurchases?: PendingStorePurchase[];
+  announcements?: AnnouncementPayload[];
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function getErrorMessage(error: unknown): string | undefined {
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (isRecord(error) && typeof error.message === 'string') {
+    return error.message;
+  }
+  return undefined;
+}
+
+function getErrorName(error: unknown): string | undefined {
+  if (isRecord(error) && typeof error.name === 'string') {
+    return error.name;
+  }
+  return undefined;
+}
+
 // Store timing configuration
 export const STORE_TIMINGS = {
   morningStart: '09:30', // 9:30 AM
@@ -146,6 +207,7 @@ export const STORE_TIMINGS = {
 // MongoDB-driven store - all data comes from MongoDB
 class Store {
   private users: User[] = [];
+  private usersById: Map<string, User> = new Map();
   private attendance: Attendance[] = [];
   private notes: Note[] = [];
   private leaves: Leave[] = [];
@@ -162,7 +224,9 @@ class Store {
     // Clear old localStorage data (except current-user-id for session)
     this.clearOldLocalStorageData();
     // Load all data from MongoDB on initialization
-    this.loadAllDataFromMongoDB();
+    this.loadAllDataFromMongoDB().catch((error: unknown) => {
+      console.error('Initial data load failed:', error);
+    });
   }
 
   // Clear old localStorage data to prevent conflicts
@@ -175,7 +239,7 @@ class Store {
         localStorage.setItem('current-user-id', currentUserId);
       }
       console.log('Cleared old localStorage data (keeping session only)');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to clear localStorage:', error);
     }
   }
@@ -189,78 +253,91 @@ class Store {
     this.loadingPromise = (async () => {
       try {
         const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
-        const [users, notes, leaves, salaries, attendance, salaryHistory, pendingAdvances, pendingStorePurchases, announcements] = await Promise.all([
-          fetch(`${apiBase}/api/users`).then(r => {
-            if (!r.ok) {
-              console.error(`Failed to fetch users: ${r.status} ${r.statusText}`);
-              return [];
-            }
-            return r.json();
-          }).catch(err => {
-            console.error('Failed to load users:', err);
-            if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
-              console.error('⚠️ API not available. Run: npx vercel dev');
-            }
-            return [];
-          }),
-          fetch(`${apiBase}/api/notes?deleted=false`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/leaves`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/salaries`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/attendance/all`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/salaryHistory`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/pendingAdvances`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/pendingStorePurchases`).then(r => r.ok ? r.json() : []).catch(() => []),
-          fetch(`${apiBase}/api/announcements`).then(r => r.ok ? r.json() : []).catch(() => []),
-        ]);
+        const response = await fetch(`${apiBase}/api/bootstrap`);
 
-        // Update in-memory cache with MongoDB data
-        this.users = users.map((u: any) => ({ ...u }));
-        this.notes = notes.map((n: any) => ({
-          ...n,
-          createdAt: new Date(n.createdAt),
-          completedAt: n.completedAt ? new Date(n.completedAt) : undefined,
-          deletedAt: n.deletedAt ? new Date(n.deletedAt) : undefined,
-        }));
-        this.leaves = leaves.map((l: any) => ({ ...l }));
-        this.salaries = salaries.map((s: any) => ({
-          ...s,
-          advances: Array.isArray(s.advances) ? s.advances : [],
-          storePurchases: Array.isArray(s.storePurchases) ? s.storePurchases : [],
-          paid: Boolean(s.paid),
-        }));
-        this.attendance = attendance.map((a: any) => ({
-          ...a,
-          punches: Array.isArray(a.punches) ? a.punches.map((p: any) => ({
-            ...p,
-            at: new Date(p.at),
-          })) : [],
-          totals: typeof a.totals === 'object' ? a.totals : { workMin: 0, breakMin: 0 },
-        }));
-        this.salaryHistory = salaryHistory.map((sh: any) => ({ ...sh }));
-        this.pendingAdvances = pendingAdvances.map((pa: any) => ({ ...pa }));
-        this.pendingStorePurchases = pendingStorePurchases.map((psp: any) => ({ ...psp }));
-        this.announcements = announcements.map((a: any) => ({
-          ...a,
-          createdAt: new Date(a.createdAt),
-          expiresAt: a.expiresAt ? new Date(a.expiresAt) : undefined,
-          readBy: Array.isArray(a.readBy) ? a.readBy : [],
-        }));
+        if (!response.ok) {
+          throw new Error(`Bootstrap request failed: ${response.status} ${response.statusText}`);
+        }
 
-        // Restore current user from session
+        const bootstrap = (await response.json()) as BootstrapResponse;
+        const usersPayload = bootstrap.users ?? [];
+        const notesPayload = bootstrap.notes ?? [];
+        const leavesPayload = bootstrap.leaves ?? [];
+        const salariesPayload = bootstrap.salaries ?? [];
+        const attendancePayload = bootstrap.attendance ?? [];
+        const salaryHistoryPayload = bootstrap.salaryHistory ?? [];
+        const pendingAdvancesPayload = bootstrap.pendingAdvances ?? [];
+        const pendingStorePurchasesPayload = bootstrap.pendingStorePurchases ?? [];
+        const announcementsPayload = bootstrap.announcements ?? [];
+
+        this.users = usersPayload.map(user => ({ ...user }));
+        this.users.sort((a, b) => a.name.localeCompare(b.name));
+        this.notes = notesPayload.map(note => ({
+          ...note,
+          createdAt: new Date(note.createdAt),
+          completedAt: note.completedAt ? new Date(note.completedAt) : undefined,
+          deletedAt: note.deletedAt ? new Date(note.deletedAt) : undefined,
+        }));
+        this.notes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        this.leaves = leavesPayload.map(leave => ({ ...leave }));
+        this.salaries = salariesPayload.map(salary => ({
+          ...salary,
+          advances: Array.isArray(salary.advances) ? salary.advances : [],
+          storePurchases: Array.isArray(salary.storePurchases) ? salary.storePurchases : [],
+          paid: Boolean(salary.paid),
+          paidDate: salary.paidDate ?? undefined,
+        }));
+        this.attendance = attendancePayload.map(record => ({
+          ...record,
+          punches: Array.isArray(record.punches)
+            ? record.punches.map(punch => ({
+                ...punch,
+                at: new Date(punch.at),
+              }))
+            : [],
+          totals: record.totals ?? { workMin: 0, breakMin: 0 },
+        }));
+        this.attendance.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        this.salaryHistory = salaryHistoryPayload.map(entry => ({ ...entry }));
+        this.pendingAdvances = pendingAdvancesPayload.map(entry => ({ ...entry }));
+        this.pendingAdvances.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        this.pendingStorePurchases = pendingStorePurchasesPayload.map(entry => ({ ...entry }));
+        this.pendingStorePurchases.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        this.announcements = announcementsPayload.map(announcement => ({
+          ...announcement,
+          body: announcement.body ?? '',
+          createdAt: new Date(announcement.createdAt),
+          expiresAt: announcement.expiresAt ? new Date(announcement.expiresAt) : undefined,
+          readBy: Array.isArray(announcement.readBy) ? announcement.readBy : [],
+        }));
+        this.announcements.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+        this.rebuildIndexes();
+
         const userId = localStorage.getItem('current-user-id');
         if (userId) {
-          this.currentUser = this.users.find(u => u.id === userId) || null;
+          this.currentUser = this.usersById.get(userId) || null;
         }
 
         this.dataLoaded = true;
         console.log('All data loaded from MongoDB');
-    } catch (error) {
+      } catch (error: unknown) {
         console.error('Failed to load data from MongoDB:', error);
         this.dataLoaded = false;
+        throw error;
+      } finally {
+        this.loadingPromise = null;
       }
     })();
 
     return this.loadingPromise;
+  }
+
+  private rebuildIndexes() {
+    this.usersById.clear();
+    for (const user of this.users) {
+      this.usersById.set(user.id, user);
+    }
   }
 
   // Ensure data is loaded before operations
@@ -271,7 +348,11 @@ class Store {
   }
 
   // Sync to MongoDB API
-  private async syncToAPI(endpoint: string, method: string, data?: any): Promise<any> {
+  private async syncToAPI<TResponse = unknown>(
+    endpoint: string,
+    method: string,
+    data?: Record<string, unknown>
+  ): Promise<TResponse> {
     try {
       const apiBase = typeof window !== 'undefined' ? window.location.origin : '';
       const response = await fetch(`${apiBase}/api/${endpoint}`, {
@@ -294,10 +375,10 @@ class Store {
         throw new Error(errorMessage);
       }
       
-      return await response.json();
-    } catch (error: any) {
+      return (await response.json()) as TResponse;
+    } catch (error: unknown) {
       console.error(`Failed to sync to API (${endpoint}):`, error);
-      throw error;
+      throw error instanceof Error ? error : new Error(getErrorMessage(error) ?? 'Unknown API error');
     }
   }
 
@@ -337,32 +418,37 @@ class Store {
         throw new Error(`Login failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
       }
       
-      const user = await response.json();
+      const user = (await response.json()) as User;
       console.log('Login successful:', user.name);
       this.currentUser = user;
-      
+
       // Store user ID in localStorage for session management
       localStorage.setItem('current-user-id', user.id);
-      
+
       // Refresh all data from MongoDB after login (don't await - do it in background)
-      this.refreshData().catch(err => console.error('Background data refresh failed:', err));
-      
+      this.refreshData().catch((err: unknown) => console.error('Background data refresh failed:', err));
+
       return user;
-    } catch (error: any) {
+    } catch (error: unknown) {
       clearTimeout(timeoutId);
       console.error('API login failed:', error);
-      
+
       // Handle timeout
-      if (error.name === 'AbortError') {
+      if (getErrorName(error) === 'AbortError') {
         throw new Error('Request timeout - API server may not be running. Please run "npm run dev:api" in another terminal.');
       }
-      
+
       // In local dev, if API is not available, show helpful error
-      if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError') || error.message?.includes('ERR_CONNECTION_REFUSED')) {
+      const message = getErrorMessage(error) ?? '';
+      if (
+        message.includes('Failed to fetch') ||
+        message.includes('NetworkError') ||
+        message.includes('ERR_CONNECTION_REFUSED')
+      ) {
         throw new Error('API server not running. Please run "npm run dev:api" in another terminal.');
       }
-      
-      throw error;
+
+      throw error instanceof Error ? error : new Error(message || 'Login request failed');
     }
   }
 
@@ -375,8 +461,8 @@ class Store {
     // Synchronous - reads from memory after initial load
     if (this.currentUser) return this.currentUser;
     const userId = localStorage.getItem('current-user-id');
-    if (userId && this.users.length > 0) {
-      this.currentUser = this.users.find(u => u.id === userId) || null;
+    if (userId && this.usersById.size > 0) {
+      this.currentUser = this.usersById.get(userId) || null;
     }
     return this.currentUser;
   }
@@ -388,15 +474,17 @@ class Store {
   }
 
   getUserById(id: string): User | null {
-    return this.users.find(u => u.id === id) || null;
+    return this.usersById.get(id) || null;
   }
 
   async createUser(name: string, role: Role, pin: string, baseSalary?: number): Promise<User> {
-    const user = await this.syncToAPI('users', 'POST', { name, role, pin, baseSalary });
+    const user = await this.syncToAPI<User>('users', 'POST', { name, role, pin, baseSalary });
     if (user) {
-    this.users.push(user);
+      this.users.push(user);
+      this.users.sort((a, b) => a.name.localeCompare(b.name));
+      this.usersById.set(user.id, user);
       await this.refreshData(); // Refresh to ensure consistency
-    return user;
+      return user;
     }
     throw new Error('Failed to create user');
   }
@@ -421,13 +509,17 @@ class Store {
       }
       
       Object.assign(user, updates);
+      this.users.sort((a, b) => a.name.localeCompare(b.name));
+      this.usersById.set(id, user);
       if (this.currentUser?.id === id) {
         this.currentUser = user;
       }
-      
-      const updated = await this.syncToAPI(`users/${id}`, 'PUT', { ...user, ...updates });
+
+      const updated = await this.syncToAPI<User>(`users/${id}`, 'PUT', { ...user, ...updates });
       if (updated) {
         Object.assign(user, updated);
+        this.users.sort((a, b) => a.name.localeCompare(b.name));
+        this.usersById.set(id, user);
       }
       
       await this.refreshData();
@@ -437,14 +529,16 @@ class Store {
   }
 
   async deleteUser(id: string): Promise<boolean> {
-      if (this.currentUser?.id === id) {
-        return false;
-      }
-    
-    await this.syncToAPI(`users/${id}`, 'DELETE');
-    await this.refreshData();
-      return true;
+    if (this.currentUser?.id === id) {
+      return false;
     }
+
+    await this.syncToAPI(`users/${id}`, 'DELETE');
+    this.users = this.users.filter(u => u.id !== id);
+    this.usersById.delete(id);
+    await this.refreshData();
+    return true;
+  }
 
   getSalaryHistory(userId: string): SalaryHistory[] {
     return this.salaryHistory
@@ -491,8 +585,8 @@ class Store {
     }
     
     // Sync punch to MongoDB
-    const result = await this.syncToAPI('attendance/punch', 'POST', { 
-      userId, 
+    const result = await this.syncToAPI<AttendancePayload>('attendance/punch', 'POST', {
+      userId,
       type,
       manualPunch: options?.manualPunch || false,
       punchedBy: options?.punchedBy,
@@ -500,7 +594,10 @@ class Store {
       customTime: options?.customTime?.toISOString()
     });
     await this.refreshData();
-    return result;
+    return {
+      ...result,
+      punches: result.punches.map(punch => ({ ...punch, at: new Date(punch.at) })),
+    };
   }
 
   private calculateTotals(att: Attendance) {
@@ -548,7 +645,7 @@ class Store {
 
   // Notes
   async addNote(text: string, userId: string, category: 'order' | 'general' | 'reminder' = 'general', adminOnly: boolean = false): Promise<Note> {
-    const note = await this.syncToAPI('notes', 'POST', { text, createdBy: userId, category, adminOnly });
+    const note = await this.syncToAPI<NotePayload>('notes', 'POST', { text, createdBy: userId, category, adminOnly });
     if (note) {
       await this.refreshData();
       return {
@@ -622,7 +719,7 @@ class Store {
 
   // Leave
   async applyLeave(userId: string, date: string, type: 'full' | 'half', reason: string): Promise<Leave> {
-    const leave = await this.syncToAPI('leaves', 'POST', { userId, date, type, reason });
+    const leave = await this.syncToAPI<Leave>('leaves', 'POST', { userId, date, type, reason });
     if (leave) {
       await this.refreshData();
     return leave;
@@ -675,9 +772,15 @@ class Store {
       finalPay,
     };
     
-    const synced = await this.syncToAPI('salaries', 'POST', updatedSalary);
+    const synced = await this.syncToAPI<SalaryPayload>('salaries', 'POST', updatedSalary);
     if (synced) {
-      Object.assign(updatedSalary, synced);
+      Object.assign(updatedSalary, {
+        ...synced,
+        advances: Array.isArray(synced.advances) ? synced.advances : [],
+        storePurchases: Array.isArray(synced.storePurchases) ? synced.storePurchases : [],
+        paid: Boolean(synced.paid),
+        paidDate: synced.paidDate ?? undefined,
+      });
     }
     
     await this.refreshData();
@@ -704,7 +807,7 @@ class Store {
 
   // Pending Advances
   async addPendingAdvance(userId: string, date: string, amount: number, description: string): Promise<PendingAdvance> {
-    const advance = await this.syncToAPI('pendingAdvances', 'POST', { userId, date, amount, description });
+    const advance = await this.syncToAPI<PendingAdvance>('pendingAdvances', 'POST', { userId, date, amount, description });
     if (advance) {
       await this.refreshData();
       return advance;
@@ -738,7 +841,7 @@ class Store {
 
   // Pending Store Purchases
   async addPendingStorePurchase(userId: string, date: string, amount: number, description: string): Promise<PendingStorePurchase> {
-    const purchase = await this.syncToAPI('pendingStorePurchases', 'POST', { userId, date, amount, description });
+    const purchase = await this.syncToAPI<PendingStorePurchase>('pendingStorePurchases', 'POST', { userId, date, amount, description });
     if (purchase) {
       await this.refreshData();
       return purchase;
@@ -772,7 +875,7 @@ class Store {
 
   // Announcements
   async addAnnouncement(title: string, body: string): Promise<Announcement> {
-    const announcement = await this.syncToAPI('announcements', 'POST', { title, body });
+    const announcement = await this.syncToAPI<AnnouncementPayload>('announcements', 'POST', { title, body });
     if (announcement) {
       await this.refreshData();
       return {

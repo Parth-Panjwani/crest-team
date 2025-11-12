@@ -1,4 +1,214 @@
-import { MongoClient, Db, Collection } from 'mongodb';
+import { MongoClient, Db, Collection, Binary, ObjectId, WithId } from 'mongodb';
+import { deflateSync, inflateSync } from 'zlib';
+import { createHash } from 'crypto';
+
+export type Role = 'admin' | 'employee' | (string & {});
+
+export type AttendancePunchType = 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END';
+
+export interface AttendancePunch {
+  at: string;
+  type: AttendancePunchType;
+  manualPunch?: boolean;
+  punchedBy?: string;
+  reason?: string;
+}
+
+export interface AttendanceTotals {
+  workMin: number;
+  breakMin: number;
+}
+
+export interface UserDocument {
+  _id?: ObjectId;
+  id: string;
+  name: string;
+  role: Role;
+  pin: string;
+  baseSalary?: number | null;
+}
+
+export interface AttendanceDocument {
+  _id?: ObjectId;
+  id: string;
+  userId: string;
+  date: string;
+  punches: AttendancePunch[] | string;
+  totals: AttendanceTotals | string;
+}
+
+export interface NoteDocument {
+  _id?: ObjectId;
+  id: string;
+  text?: string;
+  textCompressed?: Binary | Buffer;
+  textLength?: number;
+  textHash?: string;
+  createdBy: string;
+  createdAt: string;
+  status: string;
+  category?: string;
+  adminOnly?: boolean;
+  completedBy?: string;
+  completedAt?: string;
+  updatedAt?: string;
+  deleted?: boolean;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
+}
+
+export interface LeaveDocument {
+  _id?: ObjectId;
+  id: string;
+  userId: string;
+  date: string;
+  type: string;
+  reason?: string;
+  status: string;
+}
+
+export interface SalaryDocument {
+  _id?: ObjectId;
+  id: string;
+  userId: string;
+  month: string;
+  type?: string;
+  base?: number;
+  hours?: number;
+  calcPay?: number;
+  adjustments?: number;
+  advances?: unknown[] | string;
+  storePurchases?: unknown[] | string;
+  totalDeductions?: number;
+  finalPay?: number;
+  paid?: number | boolean;
+  paidDate?: string | null;
+  note?: string | null;
+}
+
+export interface SalaryHistoryDocument {
+  _id?: ObjectId;
+  id: string;
+  userId: string;
+  date: string;
+  oldBaseSalary: number | null;
+  newBaseSalary: number;
+  changedBy: string;
+  reason?: string;
+}
+
+export interface PendingAdvanceDocument {
+  _id?: ObjectId;
+  id: string;
+  userId: string;
+  date: string;
+  amount: number;
+  description?: string;
+  deducted?: boolean;
+  deductedInSalaryId?: string;
+  createdAt: string;
+}
+
+export interface PendingStorePurchaseDocument {
+  _id?: ObjectId;
+  id: string;
+  userId: string;
+  date: string;
+  amount: number;
+  description?: string;
+  deducted?: boolean;
+  deductedInSalaryId?: string;
+  createdAt: string;
+}
+
+export interface AnnouncementDocument {
+  _id?: ObjectId;
+  id: string;
+  title: string;
+  body?: string;
+  message?: string;
+  createdAt: string;
+  expiresAt?: string | null;
+  readBy?: string[];
+}
+
+export interface FormattedUser {
+  id: string;
+  name: string;
+  role: Role;
+  pin: string;
+  baseSalary?: number | null;
+}
+
+export interface FormattedAttendance {
+  id: string;
+  userId: string;
+  date: string;
+  punches: AttendancePunch[];
+  totals: AttendanceTotals;
+}
+
+export interface FormattedNote {
+  id: string;
+  text: string;
+  createdBy: string;
+  createdAt: Date;
+  status: string;
+  category?: string;
+  adminOnly: boolean;
+  completedBy?: string;
+  completedAt?: Date;
+  deleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: string | null;
+}
+
+export interface FormattedLeave {
+  id: string;
+  userId: string;
+  date: string;
+  type: string;
+  reason?: string;
+  status: string;
+}
+
+export interface FormattedSalary {
+  id: string;
+  userId: string;
+  month: string;
+  type?: string;
+  base?: number;
+  hours?: number;
+  calcPay?: number;
+  adjustments?: number;
+  advances: unknown[];
+  storePurchases: unknown[];
+  totalDeductions: number;
+  finalPay?: number;
+  paid: number | boolean | undefined;
+  paidDate?: string | null;
+  note?: string | null;
+}
+
+export interface FormattedAnnouncement {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  expiresAt: string | null;
+  readBy: string[];
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readErrorProperty<T>(error: unknown, key: string): T | undefined {
+  if (isObjectRecord(error) && key in error) {
+    return (error as Record<string, unknown>)[key] as T;
+  }
+  return undefined;
+}
 
 // MongoDB connection
 let client: MongoClient | null = null;
@@ -38,27 +248,44 @@ export async function connectToDatabase(): Promise<Db> {
     
     // Initialize with default data if empty
     await initializeDefaultData(db);
-    
+
+    // Ensure note documents use the compressed representation
+    await ensureCompressedNotes(db);
+
     return db;
-  } catch (error: any) {
-    console.error('❌ Failed to connect to MongoDB:', error.message);
-    console.error('Error code:', error.code);
-    console.error('Error name:', error.name);
-    
-    // More specific error handling
-    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+  } catch (error: unknown) {
+    const message = readErrorProperty<string>(error, 'message') ?? 'Unknown error';
+    const code = readErrorProperty<string | number>(error, 'code');
+    const name = readErrorProperty<string>(error, 'name');
+
+    console.error('❌ Failed to connect to MongoDB:', message);
+    if (code !== undefined) {
+      console.error('Error code:', code);
+    }
+    if (name) {
+      console.error('Error name:', name);
+    }
+
+    const messageLower = message.toLowerCase();
+    if (code === 'ENOTFOUND' || code === 'ECONNREFUSED') {
       throw new Error('Cannot connect to MongoDB server. Check your connection string and network access.');
     }
-    if (error.code === 8000 || error.message?.includes('authentication')) {
+    if (code === 8000 || messageLower.includes('authentication')) {
       throw new Error('MongoDB authentication failed. Check your credentials.');
     }
-    if (error.message?.includes('SSL') || error.message?.includes('TLS') || error.code === 'ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR') {
-      throw new Error('MongoDB SSL connection failed. Check: 1) Your IP is whitelisted in MongoDB Atlas, 2) Network firewall allows MongoDB connections, 3) Try again in a few moments.');
+    if (
+      messageLower.includes('ssl') ||
+      messageLower.includes('tls') ||
+      code === 'ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR'
+    ) {
+      throw new Error(
+        'MongoDB SSL connection failed. Check: 1) Your IP is whitelisted in MongoDB Atlas, 2) Network firewall allows MongoDB connections, 3) Try again in a few moments.'
+      );
     }
-    if (error.message?.includes('ReplicaSetNoPrimary')) {
+    if (messageLower.includes('replicasetnoprimary')) {
       throw new Error('MongoDB replica set issue. The cluster may be initializing. Please try again in a few moments.');
     }
-    throw error;
+    throw error instanceof Error ? error : new Error(message);
   }
 }
 
@@ -74,6 +301,7 @@ async function createIndexes(db: Db) {
     // Notes collection indexes
     await db.collection('notes').createIndex({ createdBy: 1 }).catch(() => {});
     await db.collection('notes').createIndex({ deleted: 1 }).catch(() => {});
+    await db.collection('notes').createIndex({ textHash: 1 }, { unique: false }).catch(() => {});
     
     // Leaves collection indexes
     await db.collection('leaves').createIndex({ userId: 1 }).catch(() => {});
@@ -94,8 +322,9 @@ async function createIndexes(db: Db) {
     await db.collection('announcements').createIndex({ createdAt: -1 }).catch(() => {});
     
     console.log('✅ Indexes created/verified');
-  } catch (error: any) {
-    console.error('Error creating indexes:', error.message);
+  } catch (error: unknown) {
+    const message = readErrorProperty<string>(error, 'message') ?? 'Unknown error';
+    console.error('Error creating indexes:', message);
     // Don't throw - indexes are optional
   }
 }
@@ -156,6 +385,88 @@ async function initializeDefaultData(db: Db) {
   }
 }
 
+function isBinary(value: unknown): value is Binary | Buffer {
+  if (Buffer.isBuffer(value)) {
+    return true;
+  }
+
+  if (isObjectRecord(value) && 'buffer' in value) {
+    const bufferCandidate = (value as { buffer: unknown }).buffer;
+    return Buffer.isBuffer(bufferCandidate);
+  }
+
+  return false;
+}
+
+function normalizeBinary(value: Binary | Buffer): Buffer {
+  if (Buffer.isBuffer(value)) {
+    return value;
+  }
+  return Buffer.from(value.buffer);
+}
+
+const NOTE_COMPRESSION_MIN_LENGTH = 16;
+
+export function compressNoteText(text: string): { textCompressed: Binary; textLength: number; textHash: string } {
+  const trimmed = text.trim();
+  const buffer = Buffer.from(trimmed, 'utf8');
+
+  const compressedBuffer =
+    buffer.length > NOTE_COMPRESSION_MIN_LENGTH ? deflateSync(buffer) : buffer;
+
+  return {
+    textCompressed: new Binary(compressedBuffer),
+    textLength: buffer.length,
+    textHash: createHash('sha256').update(buffer).digest('base64url'),
+  };
+}
+
+export function decompressNoteText(doc: Pick<NoteDocument, 'textCompressed' | 'text'>): string {
+  if (doc?.textCompressed && isBinary(doc.textCompressed)) {
+    const payload = normalizeBinary(doc.textCompressed);
+    try {
+      return inflateSync(payload).toString('utf8');
+    } catch {
+      return payload.toString('utf8');
+    }
+  }
+
+  if (typeof doc?.text === 'string') {
+    return doc.text;
+  }
+
+  return '';
+}
+
+async function ensureCompressedNotes(db: Db) {
+  const notesCollection = db.collection<NoteDocument>('notes');
+  const legacyNotes = await notesCollection
+    .find<Pick<NoteDocument, '_id' | 'text'>>(
+      { textCompressed: { $exists: false }, text: { $type: 'string' } },
+      { projection: { _id: 1, text: 1 } }
+    )
+    .limit(250)
+    .toArray();
+
+  if (legacyNotes.length === 0) {
+    return;
+  }
+
+  const bulk = notesCollection.initializeUnorderedBulkOp();
+  for (const note of legacyNotes) {
+    const text = typeof note.text === 'string' ? note.text : '';
+    const { textCompressed, textLength, textHash } = compressNoteText(text);
+    bulk
+      .find({ _id: note._id })
+      .updateOne({
+        $set: { textCompressed, textLength, textHash },
+        $unset: { text: '' },
+      });
+  }
+
+  await bulk.execute();
+}
+
 export async function getCollection<T>(name: string): Promise<Collection<T>> {
   const database = await connectToDatabase();
   return database.collection<T>(name);
@@ -170,46 +481,94 @@ export async function closeConnection() {
 }
 
 // Helper to convert MongoDB document to app format
-export function formatUser(doc: any): any {
+export function formatUser(doc: UserDocument | WithId<UserDocument>): FormattedUser {
   return {
-    id: doc.id || doc._id?.toString(),
+    id: doc.id || (doc as WithId<UserDocument>)._id?.toString(),
     name: doc.name,
     role: doc.role,
     pin: doc.pin,
-    baseSalary: doc.baseSalary || undefined,
+    baseSalary: doc.baseSalary ?? undefined,
   };
 }
 
-export function formatAttendance(doc: any): any {
+function parseAttendancePunches(input: AttendanceDocument['punches']): AttendancePunch[] {
+  if (Array.isArray(input)) {
+    return input;
+  }
+
+  if (typeof input === 'string' && input.trim()) {
+    try {
+      const parsed = JSON.parse(input);
+      if (Array.isArray(parsed)) {
+        return parsed as AttendancePunch[];
+      }
+    } catch {
+      // ignore malformed payloads
+    }
+  }
+
+  return [];
+}
+
+function parseAttendanceTotals(input: AttendanceDocument['totals']): AttendanceTotals {
+  if (
+    typeof input === 'object' &&
+    input !== null &&
+    'workMin' in input &&
+    'breakMin' in input
+  ) {
+    return input as AttendanceTotals;
+  }
+
+  if (typeof input === 'string' && input.trim()) {
+    try {
+      const parsed = JSON.parse(input);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'workMin' in parsed &&
+        'breakMin' in parsed
+      ) {
+        return parsed as AttendanceTotals;
+      }
+    } catch {
+      // ignore malformed payloads
+    }
+  }
+
+  return { workMin: 0, breakMin: 0 };
+}
+
+export function formatAttendance(doc: AttendanceDocument | WithId<AttendanceDocument>): FormattedAttendance {
   return {
-    id: doc.id || doc._id?.toString(),
+    id: doc.id || (doc as WithId<AttendanceDocument>)._id?.toString(),
     userId: doc.userId,
     date: doc.date,
-    punches: Array.isArray(doc.punches) ? doc.punches : JSON.parse(doc.punches || '[]'),
-    totals: typeof doc.totals === 'object' ? doc.totals : JSON.parse(doc.totals || '{"workMin":0,"breakMin":0}'),
+    punches: parseAttendancePunches(doc.punches),
+    totals: parseAttendanceTotals(doc.totals),
   };
 }
 
-export function formatNote(doc: any): any {
+export function formatNote(doc: NoteDocument | WithId<NoteDocument>): FormattedNote {
   return {
-    id: doc.id || doc._id?.toString(),
-    text: doc.text,
+    id: doc.id || (doc as WithId<NoteDocument>)._id?.toString(),
+    text: decompressNoteText(doc),
     createdBy: doc.createdBy,
     createdAt: new Date(doc.createdAt),
     status: doc.status,
     category: doc.category,
-    adminOnly: doc.adminOnly || false,
+    adminOnly: doc.adminOnly ?? false,
     completedBy: doc.completedBy,
     completedAt: doc.completedAt ? new Date(doc.completedAt) : undefined,
-    deleted: doc.deleted || false,
+    deleted: doc.deleted ?? false,
     deletedAt: doc.deletedAt ? new Date(doc.deletedAt) : undefined,
     deletedBy: doc.deletedBy,
   };
 }
 
-export function formatLeave(doc: any): any {
+export function formatLeave(doc: LeaveDocument | WithId<LeaveDocument>): FormattedLeave {
   return {
-    id: doc.id || doc._id?.toString(),
+    id: doc.id || (doc as WithId<LeaveDocument>)._id?.toString(),
     userId: doc.userId,
     date: doc.date,
     type: doc.type,
@@ -218,9 +577,28 @@ export function formatLeave(doc: any): any {
   };
 }
 
-export function formatSalary(doc: any): any {
+function parseArrayField(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // ignore malformed payloads
+    }
+  }
+
+  return [];
+}
+
+export function formatSalary(doc: SalaryDocument | WithId<SalaryDocument>): FormattedSalary {
   return {
-    id: doc.id || doc._id?.toString(),
+    id: doc.id || (doc as WithId<SalaryDocument>)._id?.toString(),
     userId: doc.userId,
     month: doc.month,
     type: doc.type,
@@ -228,13 +606,25 @@ export function formatSalary(doc: any): any {
     hours: doc.hours,
     calcPay: doc.calcPay,
     adjustments: doc.adjustments,
-    advances: Array.isArray(doc.advances) ? doc.advances : JSON.parse(doc.advances || '[]'),
-    storePurchases: Array.isArray(doc.storePurchases) ? doc.storePurchases : JSON.parse(doc.storePurchases || '[]'),
-    totalDeductions: doc.totalDeductions || 0,
+    advances: parseArrayField(doc.advances),
+    storePurchases: parseArrayField(doc.storePurchases),
+    totalDeductions: doc.totalDeductions ?? 0,
     finalPay: doc.finalPay,
-    paid: doc.paid || 0,
+    paid: doc.paid,
     paidDate: doc.paidDate,
     note: doc.note,
+  };
+}
+
+export function formatAnnouncement(doc: AnnouncementDocument | WithId<AnnouncementDocument>): FormattedAnnouncement {
+  const body = typeof doc.body === 'string' ? doc.body : typeof doc.message === 'string' ? doc.message : '';
+  return {
+    id: doc.id || (doc as WithId<AnnouncementDocument>)._id?.toString(),
+    title: doc.title,
+    body,
+    createdAt: doc.createdAt,
+    expiresAt: doc.expiresAt ?? null,
+    readBy: Array.isArray(doc.readBy) ? doc.readBy : [],
   };
 }
 
