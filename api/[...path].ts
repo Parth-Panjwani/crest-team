@@ -23,7 +23,7 @@ import type {
   SalaryDocument,
   SalaryHistoryDocument,
   UserDocument,
-} from './mongodb';
+} from './mongodb.js';
 
 type ApiMethod = NonNullable<VercelRequest['method']>;
 
@@ -687,9 +687,9 @@ const handleSalaries: ApiHandler = async (req, res, context) => {
       'note',
     ];
     for (const key of updateKeys) {
-      const value = (body as UnknownRecord)[key];
+      const value = (body as UnknownRecord)[key as string];
       if (value !== undefined) {
-        (updates as UnknownRecord)[key] = value;
+        (updates as UnknownRecord)[key as string] = value;
       }
     }
     await salariesCollection.updateOne({ id: salaryId }, { $set: updates });
