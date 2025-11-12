@@ -54,62 +54,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  // Extract path segments from query (Vercel passes dynamic route params in req.query)
-  // With [...path], Vercel passes segments as an array in req.query.path
-  // When using rewrites, the path might be in different formats
-  let pathParam = req.query.path;
-  
-  // Handle different formats
+  // Extract path segments - Vercel passes [...path] as req.query.path (array or string)
+  const pathParam = req.query.path;
   let segments: string[] = [];
+  
   if (Array.isArray(pathParam)) {
     segments = pathParam.filter(Boolean);
   } else if (typeof pathParam === 'string') {
     segments = pathParam.split('/').filter(Boolean);
   } else if (req.url) {
-    // Fallback: extract from URL if query param not available
-    // Remove query string and hash, then extract path after /api/
-    const cleanUrl = req.url.split('?')[0].split('#')[0];
-    const urlMatch = cleanUrl.match(/^\/api\/(.+)$/);
-    if (urlMatch) {
-      segments = urlMatch[1].split('/').filter(Boolean);
-    }
-  }
-  
-  // Debug logging - always log to help diagnose
-  console.log('API Request Debug:', { 
-    url: req.url, 
-    path: pathParam, 
-    segments, 
-    query: req.query,
-    method: req.method,
-    body: req.body
-  });
-
-  // If segments is empty, try to extract from URL one more time
-  if (segments.length === 0 && req.url) {
+    // Fallback: extract from URL
     const cleanUrl = req.url.split('?')[0].split('#')[0];
     if (cleanUrl.startsWith('/api/')) {
-      const pathAfterApi = cleanUrl.substring(5); // Remove '/api/'
-      segments = pathAfterApi.split('/').filter(Boolean);
-      console.log('Extracted segments from URL fallback:', segments);
+      segments = cleanUrl.substring(5).split('/').filter(Boolean);
     }
   }
 
   try {
-    // Connect to MongoDB
     await connectToDatabase();
 
-    // Auth routes - handle /api/auth/login
-    if (segments[0] === 'auth' && segments[1] === 'login') {
-      if (req.method === 'POST') {
-        const { pin } = req.body;
-        const usersCollection = await getCollection('users');
-        const user = await usersCollection.findOne({ pin }) as any;
-        if (!user) {
-          return res.status(401).json({ error: 'Invalid PIN' });
-        }
-        return res.json(formatUser(user));
+    // Auth routes
+    if (segments[0] === 'auth' && segments[1] === 'login' && req.method === 'POST') {
+      const { pin } = req.body;
+      const usersCollection = await getCollection('users');
+      const user = await usersCollection.findOne({ pin }) as any;
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid PIN' });
       }
+      return res.json(formatUser(user));
     }
 
     // Users routes
@@ -133,7 +105,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (req.method === 'DELETE') {
           await usersCollection.deleteOne({ id });
-          // Also delete related data
           const attendanceCollection = await getCollection('attendance');
           await attendanceCollection.deleteMany({ userId: id });
           const notesCollection = await getCollection('notes');
@@ -167,7 +138,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const punchDate = customTime ? new Date(customTime).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const punchTime = customTime ? new Date(customTime) : new Date();
         
-        // If manual punch, verify admin
         if (manualPunch) {
           const usersCollection = await getCollection('users');
           const adminUser = await usersCollection.findOne({ id: punchedBy, role: 'admin' }) as any;
@@ -216,11 +186,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const userId = segments[2];
         const today = new Date().toISOString().split('T')[0];
         const attendance = await attendanceCollection.findOne({ userId, date: today }) as any;
-        
         if (!attendance) {
           return res.json(null);
         }
-        
         return res.json(formatAttendance(attendance));
       }
 
@@ -232,7 +200,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .sort({ date: -1 })
           .limit(limit)
           .toArray() as any[];
-        
         return res.json(attendances.map(formatAttendance));
       }
 
@@ -251,23 +218,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (segments[1]) {
         const id = segments[1];
         if (req.method === 'PUT') {
-          const updates = req.body;
-          // Handle date fields
-          if (updates.completedAt) updates.completedAt = new Date(updates.completedAt);
-          if (updates.deletedAt) updates.deletedAt = new Date(updates.deletedAt);
+          const { text, status, category, adminOnly } = req.body;
           await notesCollection.updateOne(
             { id },
-            { $set: updates }
+            { $set: { text, status, category, adminOnly } }
           );
-          const note = await notesCollection.findOne({ id });
+          const note = await notesCollection.findOne({ id }) as any;
           return res.json(formatNote(note));
         }
         if (req.method === 'DELETE') {
-          // Soft delete
-          await notesCollection.updateOne(
-            { id },
-            { $set: { deleted: true, deletedAt: new Date().toISOString(), deletedBy: req.body.deletedBy } }
-          );
+          const { deletedBy } = req.body;
+          if (deletedBy) {
+            await notesCollection.updateOne(
+              { id },
+              { $set: { deleted: true, deletedAt: new Date().toISOString(), deletedBy } }
+            );
+          } else {
+            await notesCollection.deleteOne({ id });
+          }
           return res.json({ success: true });
         }
         if (req.method === 'POST' && segments[2] === 'restore') {
@@ -277,33 +245,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
           return res.json({ success: true });
         }
-        if (req.method === 'DELETE' && segments[2] === 'permanent') {
-          await notesCollection.deleteOne({ id });
-          return res.json({ success: true });
-        }
       } else {
         if (req.method === 'GET') {
-          const { status, showAdminOnly, currentUserId, deleted } = req.query;
+          const { deleted, userId } = req.query;
           const query: any = {};
-          
-          if (status) {
-            query.status = status;
-          }
-          
           if (deleted === 'true') {
             query.deleted = true;
+            if (userId) {
+              query.deletedBy = userId;
+            }
           } else {
             query.deleted = { $ne: true };
           }
-          
-          if (showAdminOnly === 'false' || (currentUserId && !await isAdmin(currentUserId as string))) {
-            query.adminOnly = false;
-          }
-          
-          const notes = await notesCollection
-            .find(query)
-            .sort({ createdAt: -1 })
-            .toArray();
+          const notes = await notesCollection.find(query).sort({ createdAt: -1 }).toArray() as any[];
           return res.json(notes.map(formatNote));
         }
         if (req.method === 'POST') {
@@ -316,8 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             createdAt: new Date().toISOString(),
             status: 'pending',
             category: category || 'general',
-            adminOnly: adminOnly || false,
-            deleted: false
+            adminOnly: adminOnly || false
           };
           await notesCollection.insertOne(note);
           return res.json(formatNote(note));
@@ -336,20 +289,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             { id },
             { $set: { status } }
           );
-          const leave = await leavesCollection.findOne({ id });
+          const leave = await leavesCollection.findOne({ id }) as any;
           return res.json(formatLeave(leave));
+        }
+        if (req.method === 'DELETE') {
+          await leavesCollection.deleteOne({ id });
+          return res.json({ success: true });
         }
       } else {
         if (req.method === 'GET') {
           const { userId } = req.query;
-          const query: any = {};
-          if (userId) {
-            query.userId = userId;
-          }
-          const leaves = await leavesCollection
-            .find(query)
-            .sort({ date: -1 })
-            .toArray();
+          const query: any = userId ? { userId } : {};
+          const leaves = await leavesCollection.find(query).sort({ date: -1 }).toArray() as any[];
           return res.json(leaves.map(formatLeave));
         }
         if (req.method === 'POST') {
@@ -382,79 +333,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (req.method === 'GET') {
           const { userId, month } = req.query;
           const query: any = {};
-          if (userId) {
-            query.userId = userId;
-          }
-          if (month) {
-            query.month = month;
-          }
-          const salaries = await salariesCollection.find(query).toArray();
+          if (userId) query.userId = userId;
+          if (month) query.month = month;
+          const salaries = await salariesCollection.find(query).sort({ month: -1 }).toArray() as any[];
           return res.json(salaries.map(formatSalary));
         }
         if (req.method === 'POST') {
           const salary = req.body;
-          const id = salary.id || uuidv4();
-          
-          // Calculate total deductions
-          const advances = salary.advances || [];
-          const storePurchases = salary.storePurchases || [];
-          const totalDeductions = advances.reduce((sum: number, a: any) => sum + (a.amount || 0), 0) +
-                                  storePurchases.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-          
-          // Calculate final pay (after deductions)
-          const calcPay = salary.type === 'hourly' ? salary.base * salary.hours : salary.base;
-          const finalPay = calcPay + (salary.adjustments || 0) - totalDeductions;
-          
-          const salaryDoc = {
-            id,
-            userId: salary.userId,
-            month: salary.month,
-            type: salary.type,
-            base: salary.base,
-            hours: salary.hours || 0,
-            calcPay,
-            adjustments: salary.adjustments || 0,
-            advances,
-            storePurchases,
-            totalDeductions,
-            finalPay,
-            paid: salary.paid ? 1 : 0,
-            paidDate: salary.paidDate,
-            note: salary.note || null
-          };
-          
-          await salariesCollection.replaceOne(
-            { userId: salary.userId, month: salary.month },
-            salaryDoc,
-            { upsert: true }
+          const id = uuidv4();
+          const newSalary = { ...salary, id };
+          await salariesCollection.insertOne(newSalary);
+          return res.json(formatSalary(newSalary));
+        }
+        if (req.method === 'PUT') {
+          const { id, ...updates } = req.body;
+          await salariesCollection.updateOne(
+            { id },
+            { $set: updates }
           );
-          const result = await salariesCollection.findOne({ id });
-          return res.json(formatSalary(result));
+          const updated = await salariesCollection.findOne({ id }) as any;
+          return res.json(formatSalary(updated));
         }
       }
     }
 
     // Salary History routes
-    if (segments[0] === 'salaryHistory') {
+    if (segments[0] === 'salaryHistory' && req.method === 'GET') {
       const salaryHistoryCollection = await getCollection('salaryHistory');
-      if (req.method === 'GET') {
-        const { userId } = req.query;
-        const query: any = {};
-        if (userId) {
-          query.userId = userId;
-        }
-        const history = await salaryHistoryCollection
-          .find(query)
-          .sort({ date: -1 })
-          .toArray();
-        return res.json(history);
-      }
-      if (req.method === 'POST') {
-        const entry = req.body;
-        const id = entry.id || uuidv4();
-        await salaryHistoryCollection.insertOne({ ...entry, id });
-        return res.json({ ...entry, id });
-      }
+      const { userId } = req.query;
+      const query: any = {};
+      if (userId) query.userId = userId;
+      const history = await salaryHistoryCollection.find(query).sort({ date: -1 }).toArray() as any[];
+      return res.json(history);
+    }
+
+    if (segments[0] === 'salaryHistory' && req.method === 'POST') {
+      const salaryHistoryCollection = await getCollection('salaryHistory');
+      const entry = req.body;
+      const id = uuidv4();
+      await salaryHistoryCollection.insertOne({ ...entry, id });
+      return res.json({ success: true });
     }
 
     // Pending Advances routes
@@ -463,28 +381,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === 'GET') {
         const { userId } = req.query;
         const query: any = { deducted: { $ne: true } };
-        if (userId) {
-          query.userId = userId;
-        }
-        const advances = await pendingAdvancesCollection.find(query).toArray();
+        if (userId) query.userId = userId;
+        const advances = await pendingAdvancesCollection.find(query).sort({ date: -1 }).toArray() as any[];
         return res.json(advances);
       }
       if (req.method === 'POST') {
         const advance = req.body;
-        const id = advance.id || uuidv4();
-        await pendingAdvancesCollection.insertOne({
-          ...advance,
-          id,
-          deducted: false,
-          createdAt: new Date().toISOString()
-        });
-        return res.json({ ...advance, id });
+        const id = uuidv4();
+        await pendingAdvancesCollection.insertOne({ ...advance, id, deducted: false });
+        return res.json({ ...advance, id, deducted: false });
       }
       if (req.method === 'PUT' && segments[1]) {
         const id = segments[1];
         await pendingAdvancesCollection.updateOne(
           { id },
-          { $set: { deducted: true, deductedInSalaryId: req.body.salaryId } }
+          { $set: { deducted: true } }
         );
         return res.json({ success: true });
       }
@@ -501,28 +412,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === 'GET') {
         const { userId } = req.query;
         const query: any = { deducted: { $ne: true } };
-        if (userId) {
-          query.userId = userId;
-        }
-        const purchases = await pendingStorePurchasesCollection.find(query).toArray();
+        if (userId) query.userId = userId;
+        const purchases = await pendingStorePurchasesCollection.find(query).sort({ date: -1 }).toArray() as any[];
         return res.json(purchases);
       }
       if (req.method === 'POST') {
         const purchase = req.body;
-        const id = purchase.id || uuidv4();
-        await pendingStorePurchasesCollection.insertOne({
-          ...purchase,
-          id,
-          deducted: false,
-          createdAt: new Date().toISOString()
-        });
-        return res.json({ ...purchase, id });
+        const id = uuidv4();
+        await pendingStorePurchasesCollection.insertOne({ ...purchase, id, deducted: false });
+        return res.json({ ...purchase, id, deducted: false });
       }
       if (req.method === 'PUT' && segments[1]) {
         const id = segments[1];
         await pendingStorePurchasesCollection.updateOne(
           { id },
-          { $set: { deducted: true, deductedInSalaryId: req.body.salaryId } }
+          { $set: { deducted: true } }
         );
         return res.json({ success: true });
       }
@@ -557,7 +461,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .sort({ createdAt: -1 })
             .toArray() as any[];
           return res.json(announcements.map((ann: any) => ({
-            ...ann,
+            id: ann.id,
+            title: ann.title,
+            message: ann.message,
             createdAt: new Date(ann.createdAt),
             expiresAt: ann.expiresAt ? new Date(ann.expiresAt) : null,
             readBy: ann.readBy || []
@@ -569,14 +475,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const announcement = {
             id,
             title,
-            body,
+            message: body,
             createdAt: new Date().toISOString(),
-            expiresAt: expiresAt || null,
+            expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
             readBy: []
           };
           await announcementsCollection.insertOne(announcement);
           return res.json({
-            ...announcement,
+            id: announcement.id,
+            title: announcement.title,
+            message: announcement.message,
             createdAt: new Date(announcement.createdAt),
             expiresAt: announcement.expiresAt ? new Date(announcement.expiresAt) : null
           });
@@ -584,27 +492,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // If no route matched, return 404 with debug info
-    console.log('No route matched. Segments:', segments, 'URL:', req.url, 'Query:', req.query);
-    return res.status(404).json({ error: 'Not found', path: segments, url: req.url });
+    return res.status(404).json({ error: 'Not found' });
   } catch (error: any) {
-    console.error('API Error:', error);
-    console.error('Error stack:', error.stack);
-    console.error('Error details:', {
-      message: error.message,
-      name: error.name,
-      code: error.code,
-    });
-    
-    // Don't expose internal errors in production
-    const errorMessage = error.message || 'Internal server error';
-    const isMongoError = error.name?.includes('Mongo') || error.message?.includes('MongoDB');
-    
+    console.error('API Error:', error.message);
     return res.status(500).json({ 
-      error: isMongoError 
-        ? 'Database connection error. Please check MongoDB configuration and network access.'
-        : errorMessage,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }

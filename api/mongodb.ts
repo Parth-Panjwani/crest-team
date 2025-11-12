@@ -14,13 +14,9 @@ export async function connectToDatabase(): Promise<Db> {
   }
 
   try {
-    console.log('Connecting to MongoDB...');
-    console.log('URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@')); // Hide password
-    console.log('Database:', DB_NAME);
-    
     // Add connection options for better SSL/TLS handling
     const clientOptions = {
-      serverSelectionTimeoutMS: 10000, // 10 second timeout
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 10000,
       tls: true,
@@ -31,7 +27,6 @@ export async function connectToDatabase(): Promise<Db> {
     
     client = new MongoClient(MONGODB_URI, clientOptions);
     await client.connect();
-    console.log('✅ MongoDB connected successfully');
     
     db = client.db(DB_NAME);
     
@@ -126,7 +121,6 @@ async function ensureCollections(db: Db) {
       // Create collection by inserting and deleting a dummy document
       await db.collection(collectionName).insertOne({ _temp: true });
       await db.collection(collectionName).deleteOne({ _temp: true });
-      console.log(`Created collection: ${collectionName}`);
     }
   }
 }
