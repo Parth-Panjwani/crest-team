@@ -146,16 +146,29 @@ async function ensureAdmin(userId: string): Promise<boolean> {
 let firebaseAdmin: admin.app.App | null = null;
 
 function initializeFirebase(): void {
+  // Check if Firebase is already initialized
+  try {
+    firebaseAdmin = admin.app();
+    return;
+  } catch {
+    // App doesn't exist yet, continue to initialize
+  }
+
   if (firebaseAdmin) {
     return;
   }
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
 
   if (!projectId || !privateKey || !clientEmail) {
     console.warn('⚠️  Firebase credentials not configured. Push notifications will be disabled.');
+    console.warn('Missing:', {
+      hasProjectId: !!projectId,
+      hasPrivateKey: !!privateKey,
+      hasClientEmail: !!clientEmail,
+    });
     return;
   }
 
@@ -167,8 +180,16 @@ function initializeFirebase(): void {
         clientEmail,
       }),
     });
+    console.log('✅ Firebase Admin SDK initialized successfully');
   } catch (error) {
     console.error('❌ Failed to initialize Firebase Admin SDK:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack,
+      });
+    }
   }
 }
 
@@ -179,11 +200,14 @@ async function sendPushNotification(
   body: string,
   data?: Record<string, string>
 ): Promise<void> {
+  // Initialize Firebase if not already initialized
   if (!firebaseAdmin) {
     initializeFirebase();
-    if (!firebaseAdmin) {
-      return;
-    }
+  }
+
+  if (!firebaseAdmin) {
+    console.warn('⚠️  Firebase Admin SDK not initialized. Cannot send push notification.');
+    return;
   }
 
   try {
@@ -401,14 +425,15 @@ const handleAttendance: ApiHandler = async (req, res, context) => {
     let attendance = await attendanceCollection.findOne({ userId, date: punchDate });
 
     if (!attendance) {
-      attendance = {
+      const newAttendance: AttendanceDocument = {
         id: uuidv4(),
         userId,
         date: punchDate,
         punches: [],
         totals: { workMin: 0, breakMin: 0 },
       };
-      await attendanceCollection.insertOne(attendance);
+      await attendanceCollection.insertOne(newAttendance);
+      attendance = await attendanceCollection.findOne({ userId, date: punchDate });
     }
 
     const current = formatAttendance(attendance);
@@ -1188,6 +1213,11 @@ const routeHandlers: ApiHandler[] = [
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Initialize Firebase on first request (for serverless functions)
+  if (!firebaseAdmin) {
+    initializeFirebase();
+  }
+
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
