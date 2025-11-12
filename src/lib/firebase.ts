@@ -12,29 +12,43 @@ export function initializeFirebaseClient(): FirebaseApp | null {
     return app;
   }
 
+  // Safely get environment variables with fallback to empty string
+  const getEnvVar = (key: string): string | undefined => {
+    try {
+      const value = import.meta.env[key];
+      return value && typeof value === 'string' && value.trim() !== '' ? value : undefined;
+    } catch (error) {
+      // Environment variable not available (e.g., in production build without env vars)
+      return undefined;
+    }
+  };
+
   const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    apiKey: getEnvVar('VITE_FIREBASE_API_KEY'),
+    authDomain: getEnvVar('VITE_FIREBASE_AUTH_DOMAIN'),
+    projectId: getEnvVar('VITE_FIREBASE_PROJECT_ID'),
+    storageBucket: getEnvVar('VITE_FIREBASE_STORAGE_BUCKET'),
+    messagingSenderId: getEnvVar('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: getEnvVar('VITE_FIREBASE_APP_ID'),
   };
 
   // Check if all required config values are present
-  if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-    if (import.meta.env.DEV) {
-      console.warn('⚠️  Firebase config not complete. Missing:', {
-        apiKey: !firebaseConfig.apiKey,
-        projectId: !firebaseConfig.projectId,
-      });
-    }
+  const missingVars: string[] = [];
+  if (!firebaseConfig.apiKey) missingVars.push('VITE_FIREBASE_API_KEY');
+  if (!firebaseConfig.projectId) missingVars.push('VITE_FIREBASE_PROJECT_ID');
+  if (!firebaseConfig.authDomain) missingVars.push('VITE_FIREBASE_AUTH_DOMAIN');
+  if (!firebaseConfig.appId) missingVars.push('VITE_FIREBASE_APP_ID');
+
+  if (missingVars.length > 0) {
+    // Always log in production so users know what's missing
+    console.warn('⚠️  Firebase config not complete. Missing environment variables:', missingVars.join(', '));
+    console.warn('💡 Add these variables to Vercel: Settings → Environment Variables');
     return null;
   }
 
-  // Check VAPID key
-  const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-  if (!vapidKey && import.meta.env.DEV) {
+  // Check VAPID key (optional but recommended)
+  const vapidKey = getEnvVar('VITE_FIREBASE_VAPID_KEY');
+  if (!vapidKey) {
     console.warn('⚠️  VITE_FIREBASE_VAPID_KEY is not set. FCM tokens cannot be generated.');
   }
 
@@ -49,6 +63,9 @@ export function initializeFirebaseClient(): FirebaseApp | null {
     return app;
   } catch (error) {
     console.error('❌ Failed to initialize Firebase client:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message);
+    }
     return null;
   }
 }

@@ -24,6 +24,9 @@ import type {
   SalaryDocument,
   SalaryHistoryDocument,
   UserDocument,
+  ChatDocument,
+  ChatMessageDocument,
+  FileAttachment,
 } from './mongodb.js';
 import admin from 'firebase-admin';
 
@@ -1307,6 +1310,356 @@ const handleLateApprovals: ApiHandler = async (req, res, context) => {
   return methodNotAllowed(res, context.method, ['GET', 'PUT']);
 };
 
+// Helper function to parse mentions from message text
+function parseMentions(message: string, allUsers: Array<{ id: string; name: string }>): string[] {
+  const mentions: string[] = [];
+  const mentionRegex = /@([\w\s]+?)(?=\s|$|@|,|\.|!|\?)/g;
+  let match;
+  
+  while ((match = mentionRegex.exec(message)) !== null) {
+    const mentionedName = match[1].trim().toLowerCase();
+    if (!mentionedName) continue;
+    
+    let user = allUsers.find(u => u.name.toLowerCase() === mentionedName);
+    if (!user) {
+      user = allUsers.find(u => {
+        const firstName = u.name.split(' ')[0].toLowerCase();
+        return firstName === mentionedName;
+      });
+    }
+    if (!user) {
+      user = allUsers.find(u => 
+        u.name.toLowerCase().includes(mentionedName) || 
+        mentionedName.includes(u.name.toLowerCase().split(' ')[0])
+      );
+    }
+    if (user) {
+      mentions.push(user.id);
+    }
+  }
+  
+  return [...new Set(mentions)];
+}
+
+const handleChats: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'chats') {
+    return false;
+  }
+
+  const GROUP_CHAT_ID = 'group-chat-all';
+  const chatsCollection = await getCollection<ChatDocument>('chats');
+  const chatMessagesCollection = await getCollection<ChatMessageDocument>('chatMessages');
+  const usersCollection = await getCollection<UserDocument>('users');
+
+  // GET /api/chats?userId=xxx
+  if (context.method === 'GET' && context.segments.length === 1) {
+    const userId = getString(req.query.userId);
+    if (!userId) {
+      return json(res, 400, { error: 'userId is required' });
+    }
+
+    const user = await usersCollection.findOne({ id: userId });
+    if (!user) {
+      return json(res, 404, { error: 'User not found' });
+    }
+
+    // Get or create group chat
+    let groupChat = await chatsCollection.findOne({ id: GROUP_CHAT_ID });
+    if (!groupChat) {
+      const allUsers = await usersCollection.find({}).toArray();
+      const participantIds = allUsers.map(u => u.id);
+      groupChat = {
+        id: GROUP_CHAT_ID,
+        type: 'group',
+        participantIds,
+        createdAt: new Date().toISOString(),
+      };
+      await chatsCollection.insertOne(groupChat);
+    } else if (!groupChat.participantIds.includes(userId)) {
+      await chatsCollection.updateOne(
+        { id: GROUP_CHAT_ID },
+        { $addToSet: { participantIds: userId } }
+      );
+      groupChat.participantIds.push(userId);
+    }
+
+    // Get last message
+    const lastMessage = await chatMessagesCollection
+      .find({ chatId: GROUP_CHAT_ID })
+      .sort({ createdAt: -1 })
+      .limit(1)
+      .toArray();
+
+    // Get unread count
+    const unreadCount = await chatMessagesCollection.countDocuments({
+      chatId: GROUP_CHAT_ID,
+      readBy: { $ne: userId },
+      senderId: { $ne: userId },
+    });
+
+    const enriched: any = {
+      id: groupChat.id,
+      name: groupChat.name,
+      participantIds: groupChat.participantIds,
+      lastMessageAt: groupChat.lastMessageAt || null,
+      createdAt: groupChat.createdAt,
+      unreadCount,
+      participantCount: groupChat.participantIds.length,
+    };
+
+    if (lastMessage.length > 0) {
+      const msg = lastMessage[0];
+      const sender = await usersCollection.findOne({ id: msg.senderId });
+      enriched.lastMessage = {
+        id: msg.id,
+        chatId: msg.chatId,
+        senderId: msg.senderId,
+        message: msg.message,
+        attachments: msg.attachments || [],
+        mentions: msg.mentions || [],
+        readBy: msg.readBy || [],
+        replyTo: msg.replyTo,
+        createdAt: msg.createdAt,
+        sender: sender ? { id: sender.id, name: sender.name, role: sender.role } : undefined,
+      };
+    }
+
+    return json(res, 200, [enriched]);
+  }
+
+  // GET /api/chats/:chatId/messages?limit=xxx
+  if (context.method === 'GET' && context.segments.length === 3 && context.segments[2] === 'messages') {
+    const chatId = context.segments[1];
+    const limit = parseInt(getString(req.query.limit) || '50', 10);
+    const before = getString(req.query.before);
+
+    let query: any = { chatId };
+    if (before) {
+      query.createdAt = { $lt: before };
+    }
+
+    const messages = await chatMessagesCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray();
+
+    messages.reverse();
+
+    // Enrich with sender info
+    const enrichedMessages = await Promise.all(
+      messages.map(async (msg) => {
+        const sender = await usersCollection.findOne({ id: msg.senderId });
+        return {
+          id: msg.id,
+          chatId: msg.chatId,
+          senderId: msg.senderId,
+          message: msg.message,
+          attachments: msg.attachments || [],
+          mentions: msg.mentions || [],
+          readBy: msg.readBy || [],
+          replyTo: msg.replyTo,
+          createdAt: msg.createdAt,
+          sender: sender ? { id: sender.id, name: sender.name, role: sender.role } : undefined,
+        };
+      })
+    );
+
+    return json(res, 200, enrichedMessages);
+  }
+
+  // POST /api/chats/:chatId/messages
+  if (context.method === 'POST' && context.segments.length === 3 && context.segments[2] === 'messages') {
+    const chatId = context.segments[1];
+    const body = getRequestBody(req);
+    const senderId = getString(body.senderId);
+    const message = getString(body.message);
+    const attachments = body.attachments as FileAttachment[] | undefined;
+    const replyTo = body.replyTo as ChatMessageDocument['replyTo'] | undefined;
+
+    if (!senderId) {
+      return json(res, 400, { error: 'senderId is required' });
+    }
+
+    if (!message && (!attachments || attachments.length === 0)) {
+      return json(res, 400, { error: 'message or attachments are required' });
+    }
+
+    const chat = await chatsCollection.findOne({ id: chatId });
+    if (!chat) {
+      return json(res, 404, { error: 'Chat not found' });
+    }
+
+    if (!chat.participantIds.includes(senderId)) {
+      return json(res, 403, { error: 'User is not a participant in this chat' });
+    }
+
+    // Parse mentions
+    const allUsers = await usersCollection.find({}).toArray();
+    let mentions: string[] = [];
+    if (message) {
+      mentions = parseMentions(message, allUsers.map(u => ({ id: u.id, name: u.name })));
+    }
+
+    const newMessage: ChatMessageDocument = {
+      id: uuidv4(),
+      chatId,
+      senderId,
+      message: message ? message.trim() : '',
+      attachments: attachments || [],
+      mentions: mentions.length > 0 ? mentions : undefined,
+      readBy: [senderId],
+      replyTo: replyTo || undefined,
+      createdAt: new Date().toISOString(),
+    };
+
+    await chatMessagesCollection.insertOne(newMessage);
+    await chatsCollection.updateOne(
+      { id: chatId },
+      { $set: { lastMessageAt: new Date().toISOString() } }
+    );
+
+    const sender = await usersCollection.findOne({ id: senderId });
+    const formattedMessage: any = {
+      id: newMessage.id,
+      chatId: newMessage.chatId,
+      senderId: newMessage.senderId,
+      message: newMessage.message,
+      attachments: newMessage.attachments || [],
+      mentions: newMessage.mentions || [],
+      readBy: newMessage.readBy || [],
+      replyTo: newMessage.replyTo,
+      createdAt: newMessage.createdAt,
+      sender: sender ? { id: sender.id, name: sender.name, role: sender.role } : undefined,
+    };
+
+    // Send push notifications (simplified - no WebSocket broadcast in Vercel)
+    if (sender) {
+      const otherParticipants = chat.participantIds.filter(id => id !== senderId);
+      const notificationTitle = `${sender.name} in group chat`;
+      const notificationBody = message && message.length > 100 ? message.substring(0, 100) + '...' : (message || 'Sent an attachment');
+      
+      for (const participantId of otherParticipants) {
+        if (mentions.includes(participantId)) {
+          await sendPushNotificationToUser(participantId, `@${sender.name} mentioned you`, notificationBody, {
+            type: 'chat',
+            chatId,
+            messageId: newMessage.id,
+          }, 'chat').catch(console.error);
+        } else {
+          await sendPushNotificationToUser(participantId, notificationTitle, notificationBody, {
+            type: 'chat',
+            chatId,
+            messageId: newMessage.id,
+          }, 'chat').catch(console.error);
+        }
+      }
+    }
+
+    return json(res, 200, formattedMessage);
+  }
+
+  // DELETE /api/chats/:chatId/messages
+  if (context.method === 'DELETE' && context.segments.length === 3 && context.segments[2] === 'messages') {
+    const chatId = context.segments[1];
+    await chatMessagesCollection.deleteMany({ chatId });
+    return json(res, 200, { success: true, deletedCount: 0 });
+  }
+
+  // PUT /api/chats/messages/:messageId/read
+  if (context.method === 'PUT' && context.segments.length === 4 && context.segments[1] === 'messages' && context.segments[3] === 'read') {
+    const messageId = context.segments[2];
+    const body = getRequestBody(req);
+    const userId = getString(body.userId);
+
+    if (!userId) {
+      return json(res, 400, { error: 'userId is required' });
+    }
+
+    const message = await chatMessagesCollection.findOne({ id: messageId });
+    if (!message) {
+      return json(res, 404, { error: 'Message not found' });
+    }
+
+    const readBy = message.readBy || [];
+    if (!readBy.includes(userId)) {
+      readBy.push(userId);
+      await chatMessagesCollection.updateOne(
+        { id: messageId },
+        { $set: { readBy } }
+      );
+    }
+
+    return json(res, 200, { success: true });
+  }
+
+  // GET /api/chats/unread-count?userId=xxx
+  if (context.method === 'GET' && context.segments.length === 2 && context.segments[1] === 'unread-count') {
+    const userId = getString(req.query.userId);
+    if (!userId) {
+      return json(res, 400, { error: 'userId is required' });
+    }
+
+    const count = await chatMessagesCollection.countDocuments({
+      chatId: GROUP_CHAT_ID,
+      senderId: { $ne: userId },
+      readBy: { $ne: userId },
+    });
+
+    return json(res, 200, { unreadCount: count });
+  }
+
+  // PUT /api/chats/:chatId/name
+  if (context.method === 'PUT' && context.segments.length === 3 && context.segments[2] === 'name') {
+    const chatId = context.segments[1];
+    const body = getRequestBody(req);
+    const name = getString(body.name);
+    const userId = getString(body.userId);
+
+    if (!userId) {
+      return json(res, 400, { error: 'userId is required' });
+    }
+
+    if (!name || name.trim().length === 0) {
+      return json(res, 400, { error: 'name is required' });
+    }
+
+    const user = await usersCollection.findOne({ id: userId });
+    if (!user) {
+      return json(res, 404, { error: 'User not found' });
+    }
+
+    const chat = await chatsCollection.findOne({ id: chatId });
+    if (!chat) {
+      return json(res, 404, { error: 'Chat not found' });
+    }
+
+    if (!chat.participantIds.includes(userId)) {
+      return json(res, 403, { error: 'User is not a participant in this chat' });
+    }
+
+    await chatsCollection.updateOne(
+      { id: chatId },
+      { $set: { name: name.trim() } }
+    );
+
+    const updatedChat = await chatsCollection.findOne({ id: chatId });
+    if (!updatedChat) {
+      return json(res, 404, { error: 'Chat not found after update' });
+    }
+
+    return json(res, 200, {
+      id: updatedChat.id,
+      name: updatedChat.name,
+      participantIds: updatedChat.participantIds,
+      lastMessageAt: updatedChat.lastMessageAt || null,
+      createdAt: updatedChat.createdAt,
+    });
+  }
+
+  return false;
+};
+
 const routeHandlers: ApiHandler[] = [
   handleAuth,
   handleUsers,
@@ -1323,6 +1676,7 @@ const routeHandlers: ApiHandler[] = [
   handleNotifications,
   handleLatePermissions,
   handleLateApprovals,
+  handleChats,
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

@@ -146,6 +146,43 @@ export interface NotificationDocument {
   data?: Record<string, unknown>;
 }
 
+export interface FileAttachment {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+  uploadedAt: string;
+}
+
+export interface ChatMessageDocument {
+  _id?: ObjectId;
+  id: string;
+  chatId: string;
+  senderId: string;
+  message: string;
+  attachments?: FileAttachment[];
+  mentions?: string[];
+  readBy?: string[];
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    senderName: string;
+    message: string;
+  };
+  createdAt: string;
+}
+
+export interface ChatDocument {
+  _id?: ObjectId;
+  id: string;
+  type: 'group';
+  name?: string;
+  participantIds: string[];
+  lastMessageAt?: string;
+  createdAt: string;
+}
+
 export interface FormattedUser {
   id: string;
   name: string;
@@ -331,6 +368,13 @@ async function createIndexes(db: Db) {
     // Pending advances indexes
     await db.collection('pendingAdvances').createIndex({ userId: 1 }).catch(() => {});
     
+    // Chats collection indexes
+    await db.collection('chats').createIndex({ id: 1 }, { unique: true, sparse: true }).catch(() => {});
+    
+    // Chat messages collection indexes
+    await db.collection('chatMessages').createIndex({ chatId: 1, createdAt: -1 }).catch(() => {});
+    await db.collection('chatMessages').createIndex({ id: 1 }, { unique: true, sparse: true }).catch(() => {});
+    
     // Pending store purchases indexes
     await db.collection('pendingStorePurchases').createIndex({ userId: 1 }).catch(() => {});
     
@@ -356,7 +400,9 @@ async function ensureCollections(db: Db) {
     'salaryHistory',
     'pendingAdvances',
     'pendingStorePurchases',
-    'announcements'
+    'announcements',
+    'chats',
+    'chatMessages',
   ];
   
   const existingCollections = (await db.listCollections().toArray()).map(c => c.name);

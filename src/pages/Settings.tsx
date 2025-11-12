@@ -106,9 +106,10 @@ export default function Settings() {
       if (!app) {
         console.error('❌ Firebase initialization failed')
         toast({
-          title: "Error",
-          description: "Firebase is not configured. Please contact administrator.",
+          title: "Configuration Error",
+          description: "Firebase environment variables are not set. Push notifications are disabled. Please contact administrator to configure Firebase.",
           variant: "destructive",
+          duration: 6000,
         })
         setIsEnabling(false)
         return
