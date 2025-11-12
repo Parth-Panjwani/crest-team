@@ -1247,6 +1247,66 @@ const handleFCM: ApiHandler = async (req, res, context) => {
   return methodNotAllowed(res, context.method, ['POST', 'DELETE']);
 };
 
+// Stub handlers for features not yet fully implemented
+const handleNotifications: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'notifications') {
+    return false;
+  }
+
+  if (context.method === 'GET') {
+    // Return empty array for now - notifications feature not fully implemented
+    return json(res, 200, []);
+  }
+
+  if (context.method === 'PUT' && context.segments[1] === 'read-all') {
+    return json(res, 200, { success: true });
+  }
+
+  if (context.method === 'PUT' && context.segments[1] && context.segments[2] === 'read') {
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'PUT']);
+};
+
+const handleLatePermissions: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'latePermissions') {
+    return false;
+  }
+
+  if (context.method === 'GET') {
+    // Return empty array for now - late permissions feature not fully implemented
+    return json(res, 200, []);
+  }
+
+  if (context.method === 'POST') {
+    return json(res, 200, { id: 'stub', message: 'Late permissions not yet implemented' });
+  }
+
+  if (context.method === 'PUT') {
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'POST', 'PUT']);
+};
+
+const handleLateApprovals: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'lateApprovals') {
+    return false;
+  }
+
+  if (context.method === 'GET') {
+    // Return empty array for now - late approvals feature not fully implemented
+    return json(res, 200, []);
+  }
+
+  if (context.method === 'PUT') {
+    return json(res, 200, { success: true });
+  }
+
+  return methodNotAllowed(res, context.method, ['GET', 'PUT']);
+};
+
 const routeHandlers: ApiHandler[] = [
   handleAuth,
   handleUsers,
@@ -1260,6 +1320,9 @@ const routeHandlers: ApiHandler[] = [
   handlePendingStorePurchases,
   handleAnnouncements,
   handleFCM,
+  handleNotifications,
+  handleLatePermissions,
+  handleLateApprovals,
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

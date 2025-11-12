@@ -49,7 +49,8 @@ const AppInitializer = () => {
     if (user) {
       if (dataType === 'notification') {
         store.loadNotifications(user.id).catch((error) => {
-          console.error('Failed to reload notifications:', error);
+          // Silently fail - notifications feature may not be fully implemented
+          console.debug('Notifications not available:', error instanceof Error ? error.message : String(error));
         });
       } else if (dataType === 'lateApproval' || dataType === 'latePermission') {
         // Refresh attendance data when approvals/permissions change
