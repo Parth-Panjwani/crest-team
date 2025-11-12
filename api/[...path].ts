@@ -55,15 +55,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Extract path segments from query (Vercel passes dynamic route params in req.query)
-  const pathParam = req.query.path as string | string[] | undefined;
-  const pathArray = Array.isArray(pathParam) ? pathParam : (pathParam ? [pathParam] : []);
-  const segments = pathArray.filter(Boolean);
+  // With [...path], Vercel passes segments as an array in req.query.path
+  // When using rewrites, the path might be in different formats
+  let pathParam = req.query.path;
+  
+  // Handle different formats
+  let segments: string[] = [];
+  if (Array.isArray(pathParam)) {
+    segments = pathParam.filter(Boolean);
+  } else if (typeof pathParam === 'string') {
+    segments = pathParam.split('/').filter(Boolean);
+  } else if (req.url) {
+    // Fallback: extract from URL if query param not available
+    // Remove query string and hash, then extract path after /api/
+    const cleanUrl = req.url.split('?')[0].split('#')[0];
+    const urlMatch = cleanUrl.match(/^\/api\/(.+)$/);
+    if (urlMatch) {
+      segments = urlMatch[1].split('/').filter(Boolean);
+    }
+  }
+  
+  // Debug logging - always log to help diagnose
+  console.log('API Request Debug:', { 
+    url: req.url, 
+    path: pathParam, 
+    segments, 
+    query: req.query,
+    method: req.method,
+    body: req.body
+  });
+
+  // If segments is empty, try to extract from URL one more time
+  if (segments.length === 0 && req.url) {
+    const cleanUrl = req.url.split('?')[0].split('#')[0];
+    if (cleanUrl.startsWith('/api/')) {
+      const pathAfterApi = cleanUrl.substring(5); // Remove '/api/'
+      segments = pathAfterApi.split('/').filter(Boolean);
+      console.log('Extracted segments from URL fallback:', segments);
+    }
+  }
 
   try {
     // Connect to MongoDB
     await connectToDatabase();
 
-    // Auth routes
+    // Auth routes - handle /api/auth/login
     if (segments[0] === 'auth' && segments[1] === 'login') {
       if (req.method === 'POST') {
         const { pin } = req.body;
@@ -548,7 +584,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    return res.status(404).json({ error: 'Not found' });
+    // If no route matched, return 404 with debug info
+    console.log('No route matched. Segments:', segments, 'URL:', req.url, 'Query:', req.query);
+    return res.status(404).json({ error: 'Not found', path: segments, url: req.url });
   } catch (error: any) {
     console.error('API Error:', error);
     console.error('Error stack:', error.stack);
