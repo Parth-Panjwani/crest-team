@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle, Bell, AlertTriangle, Trash2 } from 'lucide-react';
 import { Layout } from '@/components/Layout';
@@ -42,6 +42,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useStore } from '@/hooks/useStore';
 import { RefreshButton } from '@/components/RefreshButton';
+import { TeamAttendanceCard } from '@/components/TeamAttendanceCard';
 
 export default function Attendance() {
   // Subscribe to store updates to force re-renders when data changes
@@ -50,12 +51,26 @@ export default function Attendance() {
   const user = store.getCurrentUser();
   const { toast } = useToast();
   const isAdmin = user?.role === 'admin';
-  const [activeTab, setActiveTab] = useState<'employees' | 'my-attendance'>(isAdmin ? 'employees' : 'my-attendance');
+  const [activeTab, setActiveTab] = useState<'employees' | 'my-attendance' | 'insights'>(isAdmin ? 'employees' : 'my-attendance');
   const [selectedUserId, setSelectedUserId] = useState('all');
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = new Date();
     return today.toISOString().split('T')[0];
   });
+  
+  // Admin insights states
+  const [insightsPeriod, setInsightsPeriod] = useState<'1week' | '1month' | 'overall' | 'custom'>('1week');
+  const [insightsView, setInsightsView] = useState<'overall' | 'employee-wise'>('overall');
+  const [customStartDate, setCustomStartDate] = useState(() => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return weekAgo.toISOString().split('T')[0];
+  });
+  const [customEndDate, setCustomEndDate] = useState(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
+  const [selectedInsightEmployee, setSelectedInsightEmployee] = useState<string>('all');
   
   const allUsers = store.getAllUsers();
   const allEmployees = allUsers.filter(u => u.role === 'employee');
@@ -81,10 +96,10 @@ export default function Attendance() {
     if (!user) return;
     try {
       await store.punch(user.id, type, reason ? { reason } : undefined);
-      toast({ 
-        title: type === 'IN' ? 'Checked In' : type === 'OUT' ? 'Checked Out' : type === 'BREAK_START' ? 'Break Started' : 'Break Ended',
-        description: 'Attendance updated successfully'
-      });
+    toast({ 
+      title: type === 'IN' ? 'Checked In' : type === 'OUT' ? 'Checked Out' : type === 'BREAK_START' ? 'Break Started' : 'Break Ended',
+      description: 'Attendance updated successfully'
+    });
     } catch (error) {
       toast({
         title: 'Error',
@@ -164,6 +179,22 @@ export default function Attendance() {
   };
 
   const AttendanceCard = ({ att, employee }: { att: AttendanceType; employee?: User }) => {
+    // Real-time updates for work and break time
+    const [currentTime, setCurrentTime] = useState(new Date());
+    
+    const lastPunch = att.punches[att.punches.length - 1];
+    const isCurrentlyCheckedIn = lastPunch && (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END');
+    const isCurrentlyOnBreak = lastPunch && lastPunch.type === 'BREAK_START';
+
+    useEffect(() => {
+      if (isCurrentlyCheckedIn || isCurrentlyOnBreak) {
+        const interval = setInterval(() => {
+          setCurrentTime(new Date());
+        }, 1000);
+        return () => clearInterval(interval);
+      }
+    }, [isCurrentlyCheckedIn, isCurrentlyOnBreak]);
+
     // Check if user is on leave for this date
     const userLeaves = employee ? store.getUserLeaves(employee.id) : [];
     const isOnLeave = userLeaves.some(leave => 
@@ -235,9 +266,8 @@ export default function Attendance() {
       }
     }
     
-    // Check if currently on break and if complete
-    const lastPunch = att.punches[att.punches.length - 1];
-    const isOnBreak = lastPunch?.type === 'BREAK_START';
+    // Check if currently on break and if complete (using already defined variables)
+    const isOnBreak = isCurrentlyOnBreak;
     const isComplete = lastPunch?.type === 'OUT';
 
     return (
@@ -256,16 +286,16 @@ export default function Attendance() {
               </div>
               <div className="min-w-0 flex-1">
                 <h3 className="text-base sm:text-lg font-bold truncate">
-                  {new Date(att.date).toLocaleDateString('en-US', { 
-                    weekday: 'long',
-                    month: 'short',
-                    day: 'numeric'
-                  })}
-                </h3>
-                {employee && (
+              {new Date(att.date).toLocaleDateString('en-US', { 
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric'
+              })}
+            </h3>
+            {employee && (
                   <p className="text-xs sm:text-sm text-muted-foreground truncate">{employee.name}</p>
-                )}
-              </div>
+            )}
+          </div>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -305,7 +335,10 @@ export default function Attendance() {
             {/* Late/Early Badges for Check-In */}
             {checkInOutPairs.length > 0 && checkInOutPairs[0].checkIn && (() => {
               const checkIn = checkInOutPairs[0].checkIn;
-              const status = checkIn.status || calculatePunchStatus(new Date(checkIn.at), 'IN').status;
+              // Use the same simple date conversion as Dashboard (which is working)
+              const checkInDate = typeof checkIn.at === 'string' ? new Date(checkIn.at) : checkIn.at;
+              const statusInfo = calculatePunchStatus(checkInDate, 'IN');
+              const status = statusInfo.status;
               
               if (status === 'late') {
                 return (
@@ -328,7 +361,9 @@ export default function Attendance() {
             {/* Early Checkout Badge */}
             {checkInOutPairs.length > 0 && checkInOutPairs[checkInOutPairs.length - 1].checkOut && (() => {
               const checkOut = checkInOutPairs[checkInOutPairs.length - 1].checkOut!;
-              const status = checkOut.status || calculatePunchStatus(new Date(checkOut.at), 'OUT').status;
+              const checkOutDate = typeof checkOut.at === 'string' ? new Date(checkOut.at) : checkOut.at;
+              const statusInfo = calculatePunchStatus(checkOutDate, 'OUT');
+              const status = statusInfo.status;
               
               if (status === 'early') {
                 return (
@@ -351,20 +386,28 @@ export default function Attendance() {
             : null;
           
           const checkInStatusInfo = firstCheckIn 
-            ? calculatePunchStatus(new Date(firstCheckIn.at), 'IN')
+            ? (() => {
+                const checkInDate = typeof firstCheckIn.at === 'string' ? new Date(firstCheckIn.at) : firstCheckIn.at;
+                return calculatePunchStatus(checkInDate, 'IN');
+              })()
             : null;
           const checkOutStatusInfo = lastCheckOut
-            ? calculatePunchStatus(new Date(lastCheckOut.at), 'OUT')
+            ? (() => {
+                const checkOutDate = typeof lastCheckOut.at === 'string' ? new Date(lastCheckOut.at) : lastCheckOut.at;
+                return calculatePunchStatus(checkOutDate, 'OUT');
+              })()
             : null;
 
           const lateCount = checkInOutPairs.filter(pair => {
-            const status = pair.checkIn.status || calculatePunchStatus(new Date(pair.checkIn.at), 'IN').status;
+            const checkInDate = typeof pair.checkIn.at === 'string' ? new Date(pair.checkIn.at) : pair.checkIn.at;
+            const status = pair.checkIn.status || calculatePunchStatus(checkInDate, 'IN').status;
             return status === 'late';
           }).length;
           
           const earlyCheckoutCount = checkInOutPairs.filter(pair => {
             if (!pair.checkOut) return false;
-            const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+            const checkOutDate = typeof pair.checkOut.at === 'string' ? new Date(pair.checkOut.at) : pair.checkOut.at;
+            const status = pair.checkOut.status || calculatePunchStatus(checkOutDate, 'OUT').status;
             return status === 'early';
           }).length;
 
@@ -377,21 +420,19 @@ export default function Attendance() {
                   <div className="flex items-center gap-2 sm:gap-3 mb-2">
                     <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-                    </div>
+            </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Work Time</p>
                       <p className="text-base sm:text-lg md:text-xl font-bold">
                         {(() => {
                           // Calculate real-time work time if currently checked in
                           const checkIn = att.punches.find(p => p.type === 'IN');
-                          const lastPunch = att.punches[att.punches.length - 1];
-                          const isCheckedIn = lastPunch && (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END');
                           
-                          if (isCheckedIn && checkIn) {
+                          if (isCurrentlyCheckedIn && checkIn) {
                             let workMs = 0;
                             let lastIn: Date | null = null;
                             let lastBreakStart: Date | null = null;
-                            const now = new Date().getTime();
+                            const now = currentTime.getTime();
                             
                             for (const punch of att.punches) {
                               const punchTime = new Date(punch.at).getTime();
@@ -420,9 +461,9 @@ export default function Attendance() {
                           
                           return `${Math.floor(att.totals.workMin / 60)}h ${att.totals.workMin % 60}m`;
                         })()}
-                      </p>
-                    </div>
-                  </div>
+            </p>
+          </div>
+            </div>
                 </div>
 
                 {/* Break Time */}
@@ -434,11 +475,38 @@ export default function Attendance() {
                     <div className="min-w-0 flex-1">
                       <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Break Time</p>
                       <p className="text-base sm:text-lg md:text-xl font-bold">
-                        {Math.floor(att.totals.breakMin / 60)}h {att.totals.breakMin % 60}m
-                      </p>
+                        {(() => {
+                          // Calculate real-time break time if currently on break
+                          if (isCurrentlyOnBreak) {
+                            let breakMs = 0;
+                            let lastBreakStart: Date | null = null;
+                            const now = currentTime.getTime();
+                            
+                            for (const punch of att.punches) {
+                              const punchTime = new Date(punch.at).getTime();
+                              if (punch.type === 'BREAK_START') {
+                                lastBreakStart = new Date(punch.at);
+                              } else if (punch.type === 'BREAK_END' && lastBreakStart) {
+                                breakMs += punchTime - lastBreakStart.getTime();
+                                lastBreakStart = null;
+                              }
+                            }
+                            
+                            // If currently on break, add time from break start to now
+                            if (lastBreakStart) {
+                              breakMs += now - lastBreakStart.getTime();
+                            }
+                            
+                            const breakMin = Math.round(breakMs / 60000);
+                            return `${Math.floor(breakMin / 60)}h ${breakMin % 60}m`;
+                          }
+                          
+                          return `${Math.floor(att.totals.breakMin / 60)}h ${att.totals.breakMin % 60}m`;
+                        })()}
+            </p>
                     </div>
-                  </div>
-                </div>
+          </div>
+        </div>
 
                 {/* Late Count */}
                 {lateCount > 0 && (
@@ -454,8 +522,8 @@ export default function Attendance() {
                         </p>
                       </div>
                     </div>
-                  </div>
-                )}
+            </div>
+          )}
 
                 {/* Early Checkout Count */}
                 {earlyCheckoutCount > 0 && (
@@ -471,8 +539,8 @@ export default function Attendance() {
                         </p>
                       </div>
                     </div>
-                  </div>
-                )}
+            </div>
+          )}
               </div>
 
               {/* Detailed Status Information */}
@@ -585,7 +653,8 @@ export default function Attendance() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-xs font-medium">Check In</p>
                           {(() => {
-                            const status = pair.checkIn.status || calculatePunchStatus(new Date(pair.checkIn.at), 'IN').status;
+                            const checkInDate = typeof pair.checkIn.at === 'string' ? new Date(pair.checkIn.at) : pair.checkIn.at;
+                            const status = pair.checkIn.status || calculatePunchStatus(checkInDate, 'IN').status;
                             return (
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                                 status === 'late' ? 'bg-destructive/20 text-destructive border border-destructive/30' :
@@ -600,7 +669,8 @@ export default function Attendance() {
                         <p className="text-[10px] text-muted-foreground">
                           {formatTime(pair.checkIn.at)}
                           {(() => {
-                            const statusInfo = calculatePunchStatus(new Date(pair.checkIn.at), 'IN');
+                            const checkInDate = typeof pair.checkIn.at === 'string' ? new Date(pair.checkIn.at) : pair.checkIn.at;
+                            const statusInfo = calculatePunchStatus(checkInDate, 'IN');
                             if (statusInfo.status !== 'on-time' && statusInfo.message) {
                               return ` - ${statusInfo.message}`;
                             }
@@ -628,14 +698,16 @@ export default function Attendance() {
                       <div className="flex items-center gap-2">
                         <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
                           (() => {
-                            const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+                            const checkOutDate = typeof pair.checkOut.at === 'string' ? new Date(pair.checkOut.at) : pair.checkOut.at;
+                            const status = pair.checkOut.status || calculatePunchStatus(checkOutDate, 'OUT').status;
                             return status === 'overtime' ? 'bg-primary/20' :
                               status === 'early' ? 'bg-orange-500/20' :
                               'bg-success/20';
                           })()
                         }`}>
                           {(() => {
-                            const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+                            const checkOutDate = typeof pair.checkOut.at === 'string' ? new Date(pair.checkOut.at) : pair.checkOut.at;
+                            const status = pair.checkOut.status || calculatePunchStatus(checkOutDate, 'OUT').status;
                             return status === 'overtime' ? (
                               <Clock className="w-3 h-3 text-primary" />
                             ) : status === 'early' ? (
@@ -649,7 +721,8 @@ export default function Attendance() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-xs font-medium">Check Out</p>
                             {(() => {
-                              const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+                              const checkOutDate = typeof pair.checkOut.at === 'string' ? new Date(pair.checkOut.at) : pair.checkOut.at;
+                              const status = pair.checkOut.status || calculatePunchStatus(checkOutDate, 'OUT').status;
                               return (
                                 <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                                   status === 'overtime' ? 'bg-primary/20 text-primary border border-primary/30' :
@@ -664,7 +737,8 @@ export default function Attendance() {
                           <p className="text-[10px] text-muted-foreground">
                             {formatTime(pair.checkOut.at)}
                             {(() => {
-                              const statusInfo = calculatePunchStatus(new Date(pair.checkOut.at), 'OUT');
+                              const checkOutDate = typeof pair.checkOut.at === 'string' ? new Date(pair.checkOut.at) : pair.checkOut.at;
+                              const statusInfo = calculatePunchStatus(checkOutDate, 'OUT');
                               if (statusInfo.status !== 'on-time' && statusInfo.message) {
                                 return ` - ${statusInfo.message}`;
                               }
@@ -855,10 +929,11 @@ export default function Attendance() {
               </div>
             </div>
 
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'employees' | 'my-attendance')} className="w-full">
-              <TabsList className="grid w-full sm:max-w-md grid-cols-2 mb-4 sm:mb-6 h-auto">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'employees' | 'my-attendance' | 'insights')} className="w-full">
+              <TabsList className="grid w-full sm:max-w-2xl grid-cols-3 mb-4 sm:mb-6 h-auto">
                 <TabsTrigger value="employees" className="text-xs sm:text-sm py-2 sm:py-2.5">Employees</TabsTrigger>
                 <TabsTrigger value="my-attendance" className="text-xs sm:text-sm py-2 sm:py-2.5">My Attendance</TabsTrigger>
+                <TabsTrigger value="insights" className="text-xs sm:text-sm py-2 sm:py-2.5">Insights</TabsTrigger>
               </TabsList>
 
               <TabsContent value="employees" className="space-y-4 sm:space-y-6">
@@ -870,51 +945,51 @@ export default function Attendance() {
                         <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                       </div>
                       <span className="text-xs sm:text-sm font-semibold">Filters</span>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 w-full">
+                  </div>
+                  
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4 w-full">
                       <div className="w-full min-w-0">
-                        <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                    <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                           <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
-                            <SelectValue placeholder="Select employee" />
-                          </SelectTrigger>
-                          <SelectContent>
+                        <SelectValue placeholder="Select employee" />
+                      </SelectTrigger>
+                      <SelectContent>
                             <SelectItem value="all" className="text-xs sm:text-sm">All Employees</SelectItem>
-                            {allEmployees.map((u) => (
+                        {allEmployees.map((u) => (
                               <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm">
-                                {u.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                       <div className="w-full min-w-0">
-                        <input
-                          type="date"
-                          value={selectedDate}
-                          onChange={(e) => setSelectedDate(e.target.value)}
-                          className="w-full px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
-                        />
-                      </div>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                          className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                    />
+                  </div>
 
                       <div className="w-full sm:col-span-2 lg:col-span-1">
-                        <Button
-                          variant={selectedDate === today ? 'default' : 'outline'}
-                          onClick={() => {
-                            if (selectedDate === today) {
-                              setSelectedDate('');
-                              setSelectedUserId('all');
-                            } else {
-                              setSelectedDate(today);
-                            }
-                          }}
+                  <Button
+                    variant={selectedDate === today ? 'default' : 'outline'}
+                    onClick={() => {
+                      if (selectedDate === today) {
+                        setSelectedDate('');
+                        setSelectedUserId('all');
+                      } else {
+                        setSelectedDate(today);
+                      }
+                    }}
                           className={`w-full sm:w-auto ${selectedDate === today ? 'gradient-primary shadow-md' : ''} text-xs sm:text-sm h-9 sm:h-10`}
                           size="sm"
-                        >
+                  >
                           <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
                           <span>Today</span>
-                        </Button>
+                  </Button>
                       </div>
                     </div>
                   </div>
@@ -1006,193 +1081,13 @@ export default function Attendance() {
                         return null;
                       }
 
-                      const lastPunch = empAttendance?.punches[empAttendance.punches.length - 1];
-                      const isCheckedIn = lastPunch?.type === 'IN' || lastPunch?.type === 'BREAK_END';
-
                       return (
-                        <motion.div
+                        <TeamAttendanceCard
                           key={employee.id}
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className="glass-strong rounded-3xl p-5 border border-glass-border shadow-card hover:shadow-lg transition-shadow"
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                                isCheckedIn ? 'bg-success/20' : 'bg-muted/20'
-                              }`}>
-                                <Users className={`w-6 h-6 ${isCheckedIn ? 'text-success' : 'text-muted-foreground'}`} />
-                              </div>
-                              <div>
-                                <h3 className="font-bold text-base">{employee.name}</h3>
-                                <p className="text-xs text-muted-foreground">
-                                  {selectedDate && selectedDate !== '' 
-                                    ? new Date(selectedDate).toLocaleDateString('en-US', { 
-                                        month: 'short',
-                                        day: 'numeric'
-                                      })
-                                    : 'Today'}
-                                </p>
-                              </div>
-                            </div>
-                            {(() => {
-                              const checkIn = empAttendance?.punches.find(p => p.type === 'IN');
-                              const needsApproval = checkIn?.lateApprovalId && !checkIn.lateApprovalStatus;
-                              
-                              if (needsApproval) {
-                                return (
-                                  <div className="flex items-center gap-1.5">
-                                    <AlertCircle className="w-4 h-4 text-warning" />
-                                    <div className="w-2 h-2 rounded-full bg-warning animate-pulse" />
-                                  </div>
-                                );
-                              } else if (isCheckedIn) {
-                                return (
-                                  <div className="flex items-center gap-1.5">
-                                    <CheckCircle2 className="w-4 h-4 text-success" />
-                                    <div className="w-2 h-2 rounded-full bg-success" />
-                                  </div>
-                                );
-                              } else {
-                                return <div className="w-2 h-2 rounded-full bg-muted" />;
-                              }
-                            })()}
-                          </div>
-
-                          {empAttendance ? (
-                            <>
-                              {(() => {
-                                const checkIn = empAttendance.punches.find(p => p.type === 'IN');
-                                const checkOut = empAttendance.punches.find(p => p.type === 'OUT');
-                                const isLate = checkIn?.status === 'late';
-                                
-                                // Calculate late minutes from 9:30 AM
-                                let lateMinutes = 0;
-                                if (checkIn && isLate) {
-                                  const punchTime = new Date(checkIn.at);
-                                  const storeOpen = new Date(punchTime);
-                                  storeOpen.setHours(9, 30, 0, 0);
-                                  const diffMs = punchTime.getTime() - storeOpen.getTime();
-                                  lateMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
-                                }
-
-                                return (
-                                  <>
-                                    {checkIn && (
-                                      <div className={`mb-3 p-2 sm:p-3 rounded-lg border ${
-                                        isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus
-                                          ? 'border-warning/50 bg-warning/5'
-                                          : isLate && checkIn.lateApprovalStatus === 'approved'
-                                            ? 'border-success/50 bg-success/5'
-                                            : 'border-glass-border bg-card'
-                                      }`}>
-                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
-                                          <div className="flex items-center gap-2 flex-wrap">
-                                            <span className="text-xs font-medium text-muted-foreground">Check In</span>
-                                            {isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus && (
-                                              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold animate-pulse">
-                                                Action Required
-                                              </span>
-                                            )}
-                                          </div>
-                                          {isLate ? (
-                                            <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30 font-semibold self-start sm:self-auto">
-                                              {formatMinutesToHours(lateMinutes)} late
-                                            </span>
-                                          ) : checkIn.status === 'on-time' ? (
-                                            <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-success/20 text-success border border-success/30 self-start sm:self-auto">
-                                              On Time
-                                            </span>
-                                          ) : checkIn.status === 'early' ? (
-                                            <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 self-start sm:self-auto">
-                                              Early
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                        <p className="text-xs sm:text-sm font-bold mb-1">{formatTime(checkIn.at)}</p>
-                                        {isLate && checkIn.lateApprovalId && !checkIn.lateApprovalStatus && (
-                                          <div className="mt-2 p-2 rounded bg-warning/10 border border-warning/20">
-                                            <p className="text-[10px] sm:text-xs font-medium text-warning flex items-center gap-1">
-                                              <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                                              <span>Pending Approval</span>
-                                            </p>
-                                            <p className="text-[9px] sm:text-[10px] text-muted-foreground mt-0.5">
-                                              Review in Pending Approvals section
-                                            </p>
-                                          </div>
-                                        )}
-                                        {isLate && checkIn.lateApprovalStatus === 'approved' && (
-                                          <div className="mt-2 p-2 rounded bg-success/10 border border-success/20">
-                                            <p className="text-[10px] sm:text-xs font-medium text-success flex items-center gap-1">
-                                              <CheckCircle2 className="w-3 h-3 flex-shrink-0" />
-                                              <span>Approved</span>
-                                            </p>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                    <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
-                                      <div className="glass-card rounded-xl p-2 sm:p-3 border border-glass-border">
-                                        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Work Time</p>
-                                        <p className="text-base sm:text-lg font-bold">
-                                          {Math.floor((empAttendance.totals.workMin || 0) / 60)}h {(empAttendance.totals.workMin || 0) % 60}m
-                                        </p>
-                                      </div>
-                                      <div className="glass-card rounded-xl p-2 sm:p-3 border border-glass-border">
-                                        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Break Time</p>
-                                        <p className="text-base sm:text-lg font-bold">
-                                          {Math.floor((empAttendance.totals.breakMin || 0) / 60)}h {(empAttendance.totals.breakMin || 0) % 60}m
-                                        </p>
-                                      </div>
-                                    </div>
-                                    {checkOut && (
-                                      <div className={`mb-2 p-2 sm:p-3 rounded-lg border ${
-                                        checkOut.status === 'overtime'
-                                          ? 'border-primary/50 bg-primary/5'
-                                          : checkOut.status === 'early'
-                                            ? 'border-warning/50 bg-warning/5'
-                                            : 'border-glass-border bg-card'
-                                      }`}>
-                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-1">
-                                          <span className="text-xs font-medium text-muted-foreground">Check Out</span>
-                                          <div className="flex gap-2">
-                                            {checkOut.status === 'overtime' && (
-                                              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 font-semibold">
-                                                Overtime
-                                              </span>
-                                            )}
-                                            {checkOut.status === 'early' && (
-                                              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 font-semibold">
-                                                Early
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <p className="text-xs sm:text-sm font-bold">{formatTime(checkOut.at)}</p>
-                                        {checkOut.statusMessage && (
-                                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">{checkOut.statusMessage}</p>
-                                        )}
-                                      </div>
-                                    )}
-                                    {lastPunch && !checkOut && (
-                                      <div className="flex items-center gap-2 text-[10px] sm:text-xs text-muted-foreground">
-                                        <Clock className="w-3 h-3 flex-shrink-0" />
-                                        <span>Last: {formatTime(lastPunch.at)}</span>
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </>
-                          ) : (
-                            <div className="text-center py-6">
-                              <div className="w-12 h-12 rounded-full bg-muted/20 flex items-center justify-center mx-auto mb-2">
-                                <XCircle className="w-6 h-6 text-muted-foreground" />
-                              </div>
-                              <p className="text-sm text-muted-foreground">No attendance record</p>
-                            </div>
-                          )}
-                        </motion.div>
+                          employee={employee}
+                          attendance={empAttendance || null}
+                          date={selectedDate && selectedDate !== '' ? selectedDate : undefined}
+                        />
                       );
                     })}
                   </div>
@@ -1256,13 +1151,13 @@ export default function Attendance() {
                         <div className="flex items-center gap-2 sm:gap-3 mb-2">
                           <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                             <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-                          </div>
+                        </div>
                           <div className="min-w-0">
                             <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Work Time</p>
                             <p className="text-lg sm:text-xl md:text-2xl font-bold">
-                              {Math.floor((myAttendance.totals.workMin || 0) / 60)}h {(myAttendance.totals.workMin || 0) % 60}m
-                            </p>
-                          </div>
+                          {Math.floor((myAttendance.totals.workMin || 0) / 60)}h {(myAttendance.totals.workMin || 0) % 60}m
+                        </p>
+                      </div>
                         </div>
                       </div>
                       <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
@@ -1273,8 +1168,8 @@ export default function Attendance() {
                           <div className="min-w-0">
                             <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Break Time</p>
                             <p className="text-lg sm:text-xl md:text-2xl font-bold">
-                              {Math.floor((myAttendance.totals.breakMin || 0) / 60)}h {(myAttendance.totals.breakMin || 0) % 60}m
-                            </p>
+                          {Math.floor((myAttendance.totals.breakMin || 0) / 60)}h {(myAttendance.totals.breakMin || 0) % 60}m
+                        </p>
                           </div>
                         </div>
                       </div>
@@ -1347,33 +1242,33 @@ export default function Attendance() {
                           <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                         </div>
                         <span className="text-xs sm:text-sm font-semibold">Filter</span>
-                      </div>
-                      
+                    </div>
+                    
                       <div className="flex-1 w-full sm:w-auto min-w-0">
-                        <input
-                          type="date"
-                          value={selectedDate}
-                          onChange={(e) => setSelectedDate(e.target.value)}
+                      <input
+                        type="date"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
                           className="w-full px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
-                        />
-                      </div>
+                      />
+                    </div>
 
-                      <Button
-                        variant={selectedDate === today ? 'default' : 'outline'}
-                        onClick={() => {
-                          if (selectedDate === today) {
-                            setSelectedDate('');
-                          } else {
-                            setSelectedDate(today);
-                          }
-                        }}
+                    <Button
+                      variant={selectedDate === today ? 'default' : 'outline'}
+                      onClick={() => {
+                        if (selectedDate === today) {
+                          setSelectedDate('');
+                        } else {
+                          setSelectedDate(today);
+                        }
+                      }}
                         className={`w-full sm:w-auto ${selectedDate === today ? 'gradient-primary shadow-md' : ''} text-sm`}
                         size="sm"
-                      >
+                    >
                         <Calendar className="w-4 h-4 sm:mr-2" />
                         <span className="hidden sm:inline">Today</span>
                         <span className="sm:hidden">Today</span>
-                      </Button>
+                    </Button>
                     </div>
                   </div>
 
@@ -1396,6 +1291,446 @@ export default function Attendance() {
                     );
                   })()}
                 </div>
+              </TabsContent>
+
+              <TabsContent value="insights" className="space-y-4 sm:space-y-6">
+                {/* Insights Filters */}
+                <div className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 border border-glass-border shadow-card overflow-hidden">
+                  <div className="flex flex-col gap-3 sm:gap-4">
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                      </div>
+                      <span className="text-xs sm:text-sm font-semibold">Insights Filters</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4 w-full">
+                      <div className="w-full min-w-0">
+                        <Label className="text-xs sm:text-sm mb-2 block">Time Period</Label>
+                        <Select value={insightsPeriod} onValueChange={(v) => setInsightsPeriod(v as '1week' | '1month' | 'overall' | 'custom')}>
+                          <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1week" className="text-xs sm:text-sm">Last 1 Week</SelectItem>
+                            <SelectItem value="1month" className="text-xs sm:text-sm">Last 1 Month</SelectItem>
+                            <SelectItem value="overall" className="text-xs sm:text-sm">Overall</SelectItem>
+                            <SelectItem value="custom" className="text-xs sm:text-sm">Custom Range</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {insightsPeriod === 'custom' && (
+                        <>
+                          <div className="w-full min-w-0">
+                            <Label className="text-xs sm:text-sm mb-2 block">Start Date</Label>
+                            <input
+                              type="date"
+                              value={customStartDate}
+                              onChange={(e) => setCustomStartDate(e.target.value)}
+                              className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                            />
+                          </div>
+                          <div className="w-full min-w-0">
+                            <Label className="text-xs sm:text-sm mb-2 block">End Date</Label>
+                            <input
+                              type="date"
+                              value={customEndDate}
+                              onChange={(e) => setCustomEndDate(e.target.value)}
+                              className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      <div className="w-full min-w-0">
+                        <Label className="text-xs sm:text-sm mb-2 block">View Type</Label>
+                        <Select value={insightsView} onValueChange={(v) => setInsightsView(v as 'overall' | 'employee-wise')}>
+                          <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="overall" className="text-xs sm:text-sm">Overall</SelectItem>
+                            <SelectItem value="employee-wise" className="text-xs sm:text-sm">Employee-wise</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {insightsView === 'employee-wise' && (
+                        <div className="w-full min-w-0 sm:col-span-2 lg:col-span-1">
+                          <Label className="text-xs sm:text-sm mb-2 block">Select Employee</Label>
+                          <Select value={selectedInsightEmployee} onValueChange={setSelectedInsightEmployee}>
+                            <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
+                              <SelectValue placeholder="Select employee" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allEmployees.map((u) => (
+                                <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm">
+                                  {u.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Insights Content */}
+                {(() => {
+                  // Calculate date range based on period
+                  const now = new Date();
+                  const today = now.toISOString().split('T')[0];
+                  let startDate: string | null = null;
+                  let endDate: string = today;
+                  
+                  if (insightsPeriod === '1week') {
+                    const weekAgo = new Date(now);
+                    weekAgo.setDate(weekAgo.getDate() - 7);
+                    startDate = weekAgo.toISOString().split('T')[0];
+                  } else if (insightsPeriod === '1month') {
+                    const monthAgo = new Date(now);
+                    monthAgo.setMonth(monthAgo.getMonth() - 1);
+                    startDate = monthAgo.toISOString().split('T')[0];
+                  } else if (insightsPeriod === 'custom') {
+                    startDate = customStartDate;
+                    endDate = customEndDate;
+                  }
+
+                  // Get all attendance data
+                  const allAttendanceData = store.getAllAttendance();
+                  
+                  // Filter by date range
+                  const filteredData = startDate
+                    ? allAttendanceData.filter(att => att.date >= startDate! && att.date <= endDate)
+                    : allAttendanceData;
+
+                  // Helper to calculate punch status
+                  const getPunchStatus = (punchTime: Date, type: 'IN' | 'OUT'): 'on-time' | 'late' | 'early' | 'overtime' => {
+                    const timeStr = punchTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const [hours, minutes] = timeStr.split(':').map(Number);
+                    const punchMinutes = hours * 60 + minutes;
+
+                    if (type === 'IN') {
+                      const [expectedHours, expectedMinutes] = STORE_TIMINGS.morningStart.split(':').map(Number);
+                      const expectedMinutesTotal = expectedHours * 60 + expectedMinutes;
+                      if (punchMinutes < expectedMinutesTotal) return 'early';
+                      if (punchMinutes > expectedMinutesTotal) return 'late';
+                      return 'on-time';
+                    } else {
+                      const [expectedHours, expectedMinutes] = STORE_TIMINGS.eveningEnd.split(':').map(Number);
+                      const expectedMinutesTotal = expectedHours * 60 + expectedMinutes;
+                      if (punchMinutes < expectedMinutesTotal) return 'early';
+                      if (punchMinutes > expectedMinutesTotal) return 'overtime';
+                      return 'on-time';
+                    }
+                  };
+
+                  if (insightsView === 'overall') {
+                    // Calculate overall statistics
+                    const totalWorkMin = filteredData.reduce((sum, att) => sum + (att.totals.workMin || 0), 0);
+                    const totalBreakMin = filteredData.reduce((sum, att) => sum + (att.totals.breakMin || 0), 0);
+                    const totalDays = filteredData.length;
+                    const uniqueEmployees = new Set(filteredData.map(att => att.userId)).size;
+                    
+                    let lateCount = 0;
+                    let earlyCheckoutCount = 0;
+                    let onTimeCount = 0;
+                    let earlyCheckInCount = 0;
+
+                    filteredData.forEach(att => {
+                      const checkIn = att.punches.find(p => p.type === 'IN');
+                      const checkOut = att.punches.find(p => p.type === 'OUT');
+                      
+                      if (checkIn) {
+                        const checkInDate = typeof checkIn.at === 'string' ? new Date(checkIn.at) : checkIn.at;
+                        const status = getPunchStatus(checkInDate, 'IN');
+                        if (status === 'late') lateCount++;
+                        else if (status === 'early') earlyCheckInCount++;
+                        else if (status === 'on-time') onTimeCount++;
+                      }
+                      
+                      if (checkOut) {
+                        const checkOutDate = typeof checkOut.at === 'string' ? new Date(checkOut.at) : checkOut.at;
+                        const status = getPunchStatus(checkOutDate, 'OUT');
+                        if (status === 'early') earlyCheckoutCount++;
+                      }
+                    });
+
+                    const avgWorkHours = totalDays > 0 ? totalWorkMin / totalDays / 60 : 0;
+                    const onTimePercentage = totalDays > 0 ? (onTimeCount / totalDays) * 100 : 0;
+
+                    return (
+                      <div className="space-y-4 sm:space-y-6">
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Total Work</p>
+                                <p className="text-base sm:text-lg md:text-xl font-bold">
+                                  {Math.floor(totalWorkMin / 60)}h {totalWorkMin % 60}m
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
+                                <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-warning" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Total Break</p>
+                                <p className="text-base sm:text-lg md:text-xl font-bold">
+                                  {Math.floor(totalBreakMin / 60)}h {totalBreakMin % 60}m
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
+                                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-success" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Employees</p>
+                                <p className="text-base sm:text-lg md:text-xl font-bold">{uniqueEmployees}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Total Days</p>
+                                <p className="text-base sm:text-lg md:text-xl font-bold">{totalDays}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-destructive/30 bg-destructive/5">
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-destructive/20 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-destructive" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Late</p>
+                                <p className="text-base sm:text-lg md:text-xl font-bold text-destructive">{lateCount}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-orange-500/30 bg-orange-500/5">
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                                <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Early Out</p>
+                                <p className="text-base sm:text-lg md:text-xl font-bold text-orange-500">{earlyCheckoutCount}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Additional Stats */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Average Work Hours/Day</p>
+                            <p className="text-lg sm:text-xl md:text-2xl font-bold">{avgWorkHours.toFixed(1)}h</p>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-success/30 bg-success/5">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">On-Time Percentage</p>
+                            <p className="text-lg sm:text-xl md:text-2xl font-bold text-success">{onTimePercentage.toFixed(1)}%</p>
+                          </div>
+
+                          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-warning/30 bg-warning/5">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Early Check-ins</p>
+                            <p className="text-lg sm:text-xl md:text-2xl font-bold text-warning">{earlyCheckInCount}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    // Employee-wise per-day view
+                    if (selectedInsightEmployee === 'all' || !selectedInsightEmployee) {
+                      return (
+                        <div className="glass-strong rounded-2xl sm:rounded-3xl p-6 sm:p-8 md:p-12 text-center border border-glass-border">
+                          <div className="w-16 h-16 rounded-2xl bg-muted/20 flex items-center justify-center mx-auto mb-4">
+                            <Users className="w-8 h-8 text-muted-foreground" />
+                          </div>
+                          <h3 className="text-lg sm:text-xl font-semibold mb-2">Select an Employee</h3>
+                          <p className="text-sm text-muted-foreground">Please select an employee to view their daily attendance details</p>
+                        </div>
+                      );
+                    }
+
+                    // Filter data for selected employee
+                    const employeeData = filteredData
+                      .filter(att => att.userId === selectedInsightEmployee)
+                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                    const selectedEmployee = allUsers.find(u => u.id === selectedInsightEmployee);
+
+                    if (employeeData.length === 0) {
+                      return (
+                        <div className="glass-strong rounded-2xl sm:rounded-3xl p-6 sm:p-8 md:p-12 text-center border border-glass-border">
+                          <div className="w-16 h-16 rounded-2xl bg-muted/20 flex items-center justify-center mx-auto mb-4">
+                            <Calendar className="w-8 h-8 text-muted-foreground" />
+                          </div>
+                          <h3 className="text-lg sm:text-xl font-semibold mb-2">No Attendance Records</h3>
+                          <p className="text-sm text-muted-foreground">No attendance data found for {selectedEmployee?.name || 'selected employee'} in the selected date range</p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-4 sm:space-y-6">
+                        {/* Employee Summary Header */}
+                        <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <Users className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+                            </div>
+                            <div>
+                              <h3 className="text-base sm:text-lg font-bold">{selectedEmployee?.name || 'Employee'}</h3>
+                              <p className="text-xs sm:text-sm text-muted-foreground">
+                                {startDate && endDate ? `${startDate} to ${endDate}` : 'All time'} • {employeeData.length} day{employeeData.length !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Daily Attendance Cards */}
+                        <div className="space-y-3 sm:space-y-4">
+                          {employeeData.map((att, idx) => {
+                            const checkIn = att.punches.find(p => p.type === 'IN');
+                            const checkOut = att.punches.find(p => p.type === 'OUT');
+                            
+                            let checkInStatus: 'on-time' | 'late' | 'early' | null = null;
+                            let checkOutStatus: 'on-time' | 'early' | 'overtime' | null = null;
+                            
+                            if (checkIn) {
+                              const checkInDate = typeof checkIn.at === 'string' ? new Date(checkIn.at) : checkIn.at;
+                              checkInStatus = getPunchStatus(checkInDate, 'IN');
+                            }
+                            
+                            if (checkOut) {
+                              const checkOutDate = typeof checkOut.at === 'string' ? new Date(checkOut.at) : checkOut.at;
+                              checkOutStatus = getPunchStatus(checkOutDate, 'OUT');
+                            }
+
+                            const workHours = Math.floor(att.totals.workMin / 60);
+                            const workMinutes = att.totals.workMin % 60;
+                            const breakHours = Math.floor(att.totals.breakMin / 60);
+                            const breakMinutes = att.totals.breakMin % 60;
+
+                            return (
+                              <motion.div
+                                key={att.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: idx * 0.05 }}
+                                className="glass-strong rounded-xl sm:rounded-2xl p-3 sm:p-4 md:p-5 border border-glass-border shadow-card overflow-hidden"
+                              >
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-3 sm:mb-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                      <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+                                    </div>
+                                    <div>
+                                      <h4 className="text-sm sm:text-base font-bold">
+                                        {new Date(att.date).toLocaleDateString('en-US', { 
+                                          weekday: 'short', 
+                                          year: 'numeric', 
+                                          month: 'short', 
+                                          day: 'numeric' 
+                                        })}
+                                      </h4>
+                                      <p className="text-xs text-muted-foreground">{att.date}</p>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {checkInStatus === 'late' && (
+                                      <span className="px-2 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-destructive/20 text-destructive border border-destructive/30">
+                                        Late
+                                      </span>
+                                    )}
+                                    {checkInStatus === 'early' && (
+                                      <span className="px-2 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-warning/20 text-warning border border-warning/30">
+                                        Early
+                                      </span>
+                                    )}
+                                    {checkInStatus === 'on-time' && (
+                                      <span className="px-2 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-success/20 text-success border border-success/30">
+                                        On Time
+                                      </span>
+                                    )}
+                                    {checkOutStatus === 'early' && (
+                                      <span className="px-2 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-orange-500/20 text-orange-500 border border-orange-500/30">
+                                        Early Out
+                                      </span>
+                                    )}
+                                    {checkOutStatus === 'overtime' && (
+                                      <span className="px-2 py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-primary/20 text-primary border border-primary/30">
+                                        Overtime
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                                  <div className="glass-card rounded-lg sm:rounded-xl p-2 sm:p-3 border border-glass-border">
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Work Time</p>
+                                    <p className="text-sm sm:text-base font-bold">
+                                      {workHours}h {workMinutes}m
+                                    </p>
+                                  </div>
+
+                                  <div className="glass-card rounded-lg sm:rounded-xl p-2 sm:p-3 border border-glass-border">
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Break Time</p>
+                                    <p className="text-sm sm:text-base font-bold">
+                                      {breakHours}h {breakMinutes}m
+                                    </p>
+                                  </div>
+
+                                  {checkIn && (
+                                    <div className="glass-card rounded-lg sm:rounded-xl p-2 sm:p-3 border border-glass-border">
+                                      <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Check In</p>
+                                      <p className="text-sm sm:text-base font-bold">
+                                        {formatTime(checkIn.at)}
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {checkOut && (
+                                    <div className="glass-card rounded-lg sm:rounded-xl p-2 sm:p-3 border border-glass-border">
+                                      <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Check Out</p>
+                                      <p className="text-sm sm:text-base font-bold">
+                                        {formatTime(checkOut.at)}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
+                })()}
               </TabsContent>
             </Tabs>
           </motion.div>
@@ -1620,34 +1955,34 @@ export default function Attendance() {
                   <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                 </div>
                 <span className="text-xs sm:text-sm font-semibold">Filter</span>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full">
+            </div>
+            
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4 w-full">
                 <div className="w-full min-w-0">
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
-                  />
-                </div>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                    className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+              />
+            </div>
 
                 <div className="w-full sm:w-auto">
-                  <Button
-                    variant={selectedDate === today ? 'default' : 'outline'}
-                    onClick={() => {
-                      if (selectedDate === today) {
-                        setSelectedDate('');
-                      } else {
-                        setSelectedDate(today);
-                      }
-                    }}
+            <Button
+              variant={selectedDate === today ? 'default' : 'outline'}
+              onClick={() => {
+                if (selectedDate === today) {
+                  setSelectedDate('');
+                } else {
+                  setSelectedDate(today);
+                }
+              }}
                     className={`w-full sm:w-auto ${selectedDate === today ? 'gradient-primary shadow-md' : ''} text-xs sm:text-sm h-9 sm:h-10`}
                     size="sm"
-                  >
+            >
                     <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
                     <span>Today</span>
-                  </Button>
+            </Button>
                 </div>
               </div>
             </div>
@@ -1667,10 +2002,10 @@ export default function Attendance() {
                 <div className="w-16 h-16 rounded-2xl bg-muted/20 flex items-center justify-center mx-auto mb-4">
                   <Calendar className="w-8 h-8 text-muted-foreground" />
                 </div>
-                <h3 className="text-xl font-semibold mb-2">No Attendance Records</h3>
-                <p className="text-muted-foreground">Start tracking your time to see history here</p>
-              </div>
-            ) : (
+              <h3 className="text-xl font-semibold mb-2">No Attendance Records</h3>
+              <p className="text-muted-foreground">Start tracking your time to see history here</p>
+            </div>
+          ) : (
               filtered.map((att) => <AttendanceCard key={att.id} att={att} />)
             );
           })()}
