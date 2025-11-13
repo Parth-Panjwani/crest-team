@@ -125,3 +125,4 @@ npm run dev
 # Check browser console for Firebase initialization
 ```
 
+

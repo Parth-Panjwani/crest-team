@@ -374,19 +374,19 @@ export default function EmployeeFinance() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div>
               <h1 className="text-3xl font-bold mb-2">Employee Finance</h1>
             </div>
             <RefreshButton onRefresh={loadData} />
           </div>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div>
               <p className="text-muted-foreground">
                 Track salary, advances, and purchases for each employee
@@ -404,7 +404,7 @@ export default function EmployeeFinance() {
         </motion.div>
 
         {/* Employee Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {employees.map((emp, index) => {
             const data = getEmployeeData(emp)
             return (

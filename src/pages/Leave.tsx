@@ -119,17 +119,17 @@ export default function Leave() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-4xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-3xl font-bold">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">
               {isAdmin ? 'Leave Approvals' : 'Leave Requests'}
             </h1>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <RefreshButton onRefresh={loadLeaves} />
               {!isAdmin && (
                 <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
@@ -151,18 +151,18 @@ export default function Leave() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="glass-strong rounded-3xl p-6 mb-6 shadow-card"
+              className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 mb-4 sm:mb-6 shadow-card overflow-hidden"
             >
-              <h2 className="text-xl font-bold mb-4">Apply for Leave</h2>
+              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4">Apply for Leave</h2>
               
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Date</label>
                   <input
                     type="date"
                     value={formData.date}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-4 py-3 glass-card rounded-xl bg-card text-foreground border border-glass-border"
+                    className="w-full px-3 sm:px-4 py-2 sm:py-3 glass-card rounded-lg sm:rounded-xl bg-card text-foreground border border-glass-border text-xs sm:text-sm h-9 sm:h-10"
                     min={new Date().toISOString().split('T')[0]}
                   />
                 </div>
@@ -193,7 +193,7 @@ export default function Leave() {
                     value={formData.reason}
                     onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
                     placeholder="Enter reason for leave..."
-                    className="w-full h-24 px-4 py-3 glass-card rounded-xl bg-card text-foreground border border-glass-border resize-none"
+                    className="w-full h-20 sm:h-24 px-3 sm:px-4 py-2 sm:py-3 glass-card rounded-lg sm:rounded-xl bg-card text-foreground border border-glass-border resize-none text-xs sm:text-sm"
                   />
                 </div>
 
@@ -222,7 +222,7 @@ export default function Leave() {
             className="space-y-4"
           >
           {leaves.length === 0 ? (
-            <div className="glass-card rounded-2xl p-12 text-center">
+            <div className="glass-card rounded-2xl p-6 sm:p-8 md:p-12 text-center overflow-hidden">
               <CalendarIcon className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
               <h3 className="text-xl font-semibold mb-2">
                 {isAdmin ? 'No Pending Approvals' : 'No Leave Requests'}
@@ -240,7 +240,7 @@ export default function Leave() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className="glass-card rounded-2xl p-6 hover:shadow-card transition-all"
+                className="glass-card rounded-2xl p-3 sm:p-4 md:p-6 hover:shadow-card transition-all overflow-hidden"
               >
                 <div className="flex justify-between items-start mb-3">
                   <div>

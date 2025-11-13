@@ -572,15 +572,15 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="mb-4 sm:mb-6 md:mb-8"
         >
-          <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-3 md:gap-4 w-full">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-3 sm:gap-4 mb-3 sm:mb-4">
+            <div className="flex items-center gap-2 sm:gap-3 md:gap-4 w-full">
               {/* Company Logo - Mobile Only */}
               <div className="md:hidden flex items-center flex-shrink-0 z-10">
                 <div className="flex items-center justify-center p-2.5 rounded-xl bg-white border-2 border-gray-300 shadow-md">
@@ -635,7 +635,7 @@ export default function Dashboard() {
               key={announcement.id}
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="glass-card rounded-2xl p-4 mb-4 border-l-4 border-accent"
+              className="glass-card rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4 border-l-4 border-accent overflow-hidden"
             >
               <div className="flex justify-between items-start">
                 <div>
@@ -667,8 +667,8 @@ export default function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               className="mb-6"
             >
-              <div className="glass-strong rounded-3xl p-6 border border-glass-border shadow-card">
-                <div className="flex items-center gap-3 mb-4">
+              <div className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 border border-glass-border shadow-card overflow-hidden">
+                <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
                   <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center">
                     <AlertTriangle className="w-5 h-5 text-warning" />
                   </div>
@@ -698,11 +698,11 @@ export default function Dashboard() {
                           key={approval.id}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
-                          className="glass-card rounded-xl p-4 border border-glass-border"
+                          className="glass-card rounded-xl p-3 sm:p-4 border border-glass-border overflow-hidden"
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
+                          <div className="flex flex-col sm:flex-row items-start justify-between gap-2 sm:gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 <p className="text-sm font-semibold">
                                   {employee?.name || "Unknown"}
                                 </p>
@@ -739,7 +739,7 @@ export default function Dashboard() {
                               <p className="text-xs text-muted-foreground italic mb-1">
                                 Work time starts from check-in (not approval)
                               </p>
-                              <div className="flex gap-2 mt-3">
+                              <div className="flex gap-2 mt-3 flex-wrap">
                                 <Button
                                   size="sm"
                                   onClick={() => {
@@ -791,11 +791,11 @@ export default function Dashboard() {
                           key={permission.id}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
-                          className="glass-card rounded-xl p-4 border border-glass-border"
+                          className="glass-card rounded-xl p-3 sm:p-4 border border-glass-border overflow-hidden"
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
+                          <div className="flex flex-col sm:flex-row items-start justify-between gap-2 sm:gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 <p className="text-sm font-semibold">
                                   {employee?.name || "Unknown"}
                                 </p>
@@ -1358,7 +1358,7 @@ export default function Dashboard() {
                   View All
                 </Button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                 {todayAttendance.length === 0 ? (
                   <div className="col-span-2">
                     <p className="text-muted-foreground text-center py-8">
@@ -1520,7 +1520,7 @@ export default function Dashboard() {
                         key={employee.id}
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className={`glass-strong rounded-2xl p-5 border transition-all hover:shadow-lg ${
+                        className={`glass-strong rounded-2xl p-3 sm:p-4 md:p-5 border transition-all hover:shadow-lg overflow-hidden ${
                           isCheckedIn
                             ? "border-success/30 bg-success/5"
                             : isCheckedOut
@@ -1529,7 +1529,7 @@ export default function Dashboard() {
                         }`}
                       >
                         {/* Header */}
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
                           <div className="flex items-center gap-3">
                             <div
                               className={`w-10 h-10 rounded-xl flex items-center justify-center ${
@@ -1620,7 +1620,7 @@ export default function Dashboard() {
 
                         {/* Check In Time */}
                         {checkIn ? (
-                          <div className="mb-3 p-3 rounded-lg bg-card border border-glass-border">
+                          <div className="mb-2 sm:mb-3 p-2 sm:p-3 rounded-lg bg-card border border-glass-border overflow-hidden">
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-xs font-medium text-muted-foreground">
                                 Check In
@@ -1673,8 +1673,8 @@ export default function Dashboard() {
 
                         {/* Work Time & Break Time */}
                         {attendance && (
-                          <div className="grid grid-cols-2 gap-3 mb-3">
-                            <div className="glass-card rounded-xl p-3 border border-glass-border">
+                          <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-2 sm:mb-3">
+                            <div className="glass-card rounded-xl p-2 sm:p-3 border border-glass-border overflow-hidden">
                               <p className="text-xs text-muted-foreground mb-1">
                                 Work Time
                               </p>
@@ -1683,7 +1683,7 @@ export default function Dashboard() {
                                 {displayWorkTime % 60}m
                               </p>
                             </div>
-                            <div className="glass-card rounded-xl p-3 border border-glass-border">
+                            <div className="glass-card rounded-xl p-2 sm:p-3 border border-glass-border overflow-hidden">
                               <p className="text-xs text-muted-foreground mb-1">
                                 Break Time
                               </p>

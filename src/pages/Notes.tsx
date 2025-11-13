@@ -576,49 +576,50 @@ export default function Notes() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-4xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className="flex flex-col gap-4 mb-4">
+          <div className="flex flex-col gap-3 sm:gap-4 mb-3 sm:mb-4">
             {/* Title and New Note Button Row */}
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-bold">Notes</h1>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-1 sm:mb-2">Notes</h1>
+                <p className="text-xs sm:text-sm text-muted-foreground">Track and manage your notes</p>
               </div>
-              <RefreshButton onRefresh={loadNotes} />
-            </div>
-            <div className="flex justify-between items-center mt-4">
-              <div>
-                <p className="text-sm text-muted-foreground mt-1">Track and manage your notes</p>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex-shrink-0">
+                  <RefreshButton onRefresh={loadNotes} />
+                </div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial min-w-0">
+                  <Button
+                    onClick={() => {
+                      setEditingNote(null);
+                      setNoteText('');
+                      setNoteCategory('general');
+                      setNoteSubCategory(undefined);
+                      setNoteAdminOnly(false);
+                      setNoteImageUrl(undefined);
+                      setShowEditor(true);
+                    }}
+                    className="w-full sm:w-auto gradient-primary shadow-md hover:shadow-lg text-xs sm:text-sm"
+                    size="sm"
+                  >
+                    <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">New Note</span>
+                    <span className="sm:hidden">New</span>
+                  </Button>
+                </motion.div>
               </div>
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button
-                onClick={() => {
-                  setEditingNote(null);
-                  setNoteText('');
-                  setNoteCategory('general');
-                  setNoteSubCategory(undefined);
-                  setNoteAdminOnly(false);
-                  setNoteImageUrl(undefined);
-                  setShowEditor(true);
-                }}
-                  className="gradient-primary shadow-md hover:shadow-lg text-sm md:text-base"
-                  size="sm"
-                >
-                  <Plus className="w-4 h-4 md:mr-2" />
-                  <span className="hidden md:inline">New Note</span>
-                </Button>
-              </motion.div>
             </div>
             
             {/* Segmented Control - Same as Attendance */}
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'notes' | 'recycle')} className="w-full">
-              <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
-                <TabsTrigger value="notes">Active Notes</TabsTrigger>
-                <TabsTrigger value="recycle" className="relative">
+              <TabsList className="grid w-full sm:max-w-md grid-cols-2 mb-4 sm:mb-6 h-auto">
+                <TabsTrigger value="notes" className="text-xs sm:text-sm py-2 sm:py-2.5">Active Notes</TabsTrigger>
+                <TabsTrigger value="recycle" className="relative text-xs sm:text-sm py-2 sm:py-2.5">
                   Recycle Bin
                   {deletedNotes.length > 0 && (
                     <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-white text-xs rounded-full flex items-center justify-center font-semibold">
@@ -642,7 +643,7 @@ export default function Notes() {
                 </div>
 
                 {/* Filters */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
             {/* Status Filter Card */}
             <div className="glass-card rounded-2xl p-4 border-2 border-transparent hover:border-primary/20 transition-all">
               <div className="flex items-center gap-2 mb-3">

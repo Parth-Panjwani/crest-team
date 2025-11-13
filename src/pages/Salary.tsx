@@ -454,13 +454,13 @@ export default function Salary() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold mb-1">Salary</h1>
               <p className="text-sm text-muted-foreground">
@@ -495,7 +495,7 @@ export default function Salary() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="glass-strong rounded-3xl p-8 shadow-card"
+            className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 lg:p-8 shadow-card overflow-hidden"
           >
             {currentSalary ? (
               <>
@@ -580,27 +580,27 @@ export default function Salary() {
         ) : (
           // Admin View
           <>
-            <div className="flex flex-col gap-4 mb-6">
-              <div className="glass-card rounded-2xl p-4 md:p-5">
-                <p className="text-xs md:text-sm text-muted-foreground mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
+              <div className="glass-card rounded-2xl p-3 sm:p-4 md:p-5 overflow-hidden">
+                <p className="text-xs sm:text-sm text-muted-foreground mb-1 sm:mb-2">
                   Total Payout
                 </p>
-                <p className="text-2xl md:text-3xl font-bold">
+                <p className="text-xl sm:text-2xl md:text-3xl font-bold">
                   ₹{totalPayout.toLocaleString()}
                 </p>
               </div>
-              <div className="glass-card rounded-2xl p-4 md:p-5">
-                <p className="text-xs md:text-sm text-muted-foreground mb-2">
+              <div className="glass-card rounded-2xl p-3 sm:p-4 md:p-5 overflow-hidden">
+                <p className="text-xs sm:text-sm text-muted-foreground mb-1 sm:mb-2">
                   Pending
                 </p>
-                <p className="text-2xl md:text-3xl font-bold text-warning">
+                <p className="text-xl sm:text-2xl md:text-3xl font-bold text-warning">
                   ₹{pendingPayout.toLocaleString()}
                 </p>
               </div>
             </div>
 
             {employees.length === 0 ? (
-              <div className="glass-card rounded-2xl p-12 text-center">
+              <div className="glass-card rounded-2xl p-6 sm:p-8 md:p-12 text-center overflow-hidden">
                 <DollarSign className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
                 <h3 className="text-xl font-semibold mb-2">No Employees</h3>
                 <p className="text-muted-foreground">

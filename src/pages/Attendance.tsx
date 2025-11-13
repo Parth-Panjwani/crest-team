@@ -802,20 +802,22 @@ export default function Attendance() {
   if (isAdmin) {
     return (
       <Layout>
-        <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
+        <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
+            className="mb-4 sm:mb-6 md:mb-8"
           >
-            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
+            <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-2">Staff Attendance</h1>
-                <p className="text-xs sm:text-sm text-muted-foreground">Track and manage employee attendance</p>
+                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mb-1 sm:mb-2">Staff Attendance</h1>
+                <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground">Track and manage employee attendance</p>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-                <RefreshButton />
-                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial">
+                <div className="flex-shrink-0">
+                  <RefreshButton />
+                </div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial min-w-0">
                   <Button
                     onClick={() => {
                       setSelectedEmployeeForPunch(null);
@@ -830,22 +832,22 @@ export default function Attendance() {
                       setManualPunchReason('');
                       setIsManualPunchDialogOpen(true);
                     }}
-                    className="w-full sm:w-auto gradient-primary shadow-md hover:shadow-lg text-sm"
+                    className="w-full sm:w-auto gradient-primary shadow-md hover:shadow-lg text-xs sm:text-sm"
                     size="sm"
                   >
-                    <UserPlus className="w-4 h-4 sm:mr-2" />
+                    <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
                     <span className="hidden sm:inline">Manual Punch</span>
                     <span className="sm:hidden">Punch</span>
                   </Button>
                 </motion.div>
-                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial">
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial min-w-0">
                   <Button
                     onClick={() => setClearAttendanceDialogOpen(true)}
                     variant="destructive"
-                    className="w-full sm:w-auto shadow-md hover:shadow-lg text-sm"
+                    className="w-full sm:w-auto shadow-md hover:shadow-lg text-xs sm:text-sm"
                     size="sm"
                   >
-                    <Trash2 className="w-4 h-4 sm:mr-2" />
+                    <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
                     <span className="hidden sm:inline">Clear All</span>
                     <span className="sm:hidden">Clear</span>
                   </Button>
@@ -854,78 +856,83 @@ export default function Attendance() {
             </div>
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'employees' | 'my-attendance')} className="w-full">
-              <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
-                <TabsTrigger value="employees">Employees</TabsTrigger>
-                <TabsTrigger value="my-attendance">My Attendance</TabsTrigger>
+              <TabsList className="grid w-full sm:max-w-md grid-cols-2 mb-4 sm:mb-6 h-auto">
+                <TabsTrigger value="employees" className="text-xs sm:text-sm py-2 sm:py-2.5">Employees</TabsTrigger>
+                <TabsTrigger value="my-attendance" className="text-xs sm:text-sm py-2 sm:py-2.5">My Attendance</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="employees" className="space-y-6">
+              <TabsContent value="employees" className="space-y-4 sm:space-y-6">
                 {/* Filters Row */}
-                <div className="glass-strong rounded-3xl p-4 md:p-6 border border-glass-border shadow-card">
-                  <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <Filter className="w-5 h-5 text-primary" />
+                <div className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 border border-glass-border shadow-card overflow-hidden">
+                  <div className="flex flex-col gap-3 sm:gap-4">
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                       </div>
-                      <span className="text-sm font-semibold">Filters</span>
+                      <span className="text-xs sm:text-sm font-semibold">Filters</span>
                     </div>
                     
-                    <div className="flex-1 w-full md:w-auto min-w-[200px]">
-                      <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select employee" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Employees</SelectItem>
-                          {allEmployees.map((u) => (
-                            <SelectItem key={u.id} value={u.id}>
-                              {u.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 w-full">
+                      <div className="w-full min-w-0">
+                        <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                          <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
+                            <SelectValue placeholder="Select employee" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all" className="text-xs sm:text-sm">All Employees</SelectItem>
+                            {allEmployees.map((u) => (
+                              <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm">
+                                {u.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                    <div className="flex-1 w-full md:w-auto min-w-[200px]">
-                      <input
-                        type="date"
-                        value={selectedDate}
-                        onChange={(e) => setSelectedDate(e.target.value)}
-                        className="w-full px-4 py-2 rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                    </div>
+                      <div className="w-full min-w-0">
+                        <input
+                          type="date"
+                          value={selectedDate}
+                          onChange={(e) => setSelectedDate(e.target.value)}
+                          className="w-full px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                        />
+                      </div>
 
-                    <Button
-                      variant={selectedDate === today ? 'default' : 'outline'}
-                      onClick={() => {
-                        if (selectedDate === today) {
-                          setSelectedDate('');
-                          setSelectedUserId('all');
-                        } else {
-                          setSelectedDate(today);
-                        }
-                      }}
-                      className={selectedDate === today ? 'gradient-primary shadow-md' : ''}
-                    >
-                      <Calendar className="w-4 h-4 mr-2" />
-                      Today
-                    </Button>
+                      <div className="w-full sm:col-span-2 lg:col-span-1">
+                        <Button
+                          variant={selectedDate === today ? 'default' : 'outline'}
+                          onClick={() => {
+                            if (selectedDate === today) {
+                              setSelectedDate('');
+                              setSelectedUserId('all');
+                            } else {
+                              setSelectedDate(today);
+                            }
+                          }}
+                          className={`w-full sm:w-auto ${selectedDate === today ? 'gradient-primary shadow-md' : ''} text-xs sm:text-sm h-9 sm:h-10`}
+                          size="sm"
+                        >
+                          <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
+                          <span>Today</span>
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 {/* Attendance Insights - Only when viewing all employees */}
                 {selectedUserId === 'all' && (
-                  <div className="glass-strong rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-glass-border shadow-card">
+                  <div className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 border border-glass-border shadow-card overflow-hidden">
                     <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                         <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                       </div>
-                      <div className="min-w-0">
-                        <h2 className="text-base sm:text-lg font-bold">Attendance Insights</h2>
-                        <p className="text-[10px] sm:text-xs text-muted-foreground">Overview of staff attendance patterns</p>
+                      <div className="min-w-0 flex-1">
+                        <h2 className="text-sm sm:text-base md:text-lg font-bold truncate">Attendance Insights</h2>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Overview of staff attendance patterns</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
                       {(() => {
                         const todayAttendances = allEmployees.map(emp => ({
                           employee: emp,
@@ -989,7 +996,7 @@ export default function Attendance() {
 
                 {/* Staff Attendance Grid */}
                 {selectedUserId === 'all' ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {allEmployees.map((employee) => {
                       const empAttendance = selectedDate && selectedDate !== ''
                         ? store.getAttendanceHistory(employee.id).find(a => a.date === selectedDate)
@@ -1606,38 +1613,43 @@ export default function Attendance() {
           </div>
 
           {/* Filters Row */}
-          <div className="glass-strong rounded-3xl p-4 md:p-6 mb-6 border border-glass-border shadow-card">
-            <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Filter className="w-5 h-5 text-primary" />
+          <div className="glass-strong rounded-2xl sm:rounded-3xl p-3 sm:p-4 md:p-6 mb-4 sm:mb-6 border border-glass-border shadow-card overflow-hidden">
+            <div className="flex flex-col gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                 </div>
-                <span className="text-sm font-semibold">Filter</span>
+                <span className="text-xs sm:text-sm font-semibold">Filter</span>
               </div>
               
-              <div className="flex-1 w-full md:w-auto min-w-[200px]">
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full px-4 py-2 rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full">
+                <div className="w-full min-w-0">
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="w-full px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                  />
+                </div>
 
-              <Button
-                variant={selectedDate === today ? 'default' : 'outline'}
-                onClick={() => {
-                  if (selectedDate === today) {
-                    setSelectedDate('');
-                  } else {
-                    setSelectedDate(today);
-                  }
-                }}
-                className={selectedDate === today ? 'gradient-primary shadow-md' : ''}
-              >
-                <Calendar className="w-4 h-4 mr-2" />
-                Today
-              </Button>
+                <div className="w-full sm:w-auto">
+                  <Button
+                    variant={selectedDate === today ? 'default' : 'outline'}
+                    onClick={() => {
+                      if (selectedDate === today) {
+                        setSelectedDate('');
+                      } else {
+                        setSelectedDate(today);
+                      }
+                    }}
+                    className={`w-full sm:w-auto ${selectedDate === today ? 'gradient-primary shadow-md' : ''} text-xs sm:text-sm h-9 sm:h-10`}
+                    size="sm"
+                  >
+                    <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
+                    <span>Today</span>
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </motion.div>

@@ -288,7 +288,7 @@ export default function Settings() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-2xl mx-auto">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-2xl mx-auto overflow-x-hidden">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -305,7 +305,7 @@ export default function Settings() {
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="glass-card rounded-2xl p-6"
+            className="glass-card rounded-2xl p-3 sm:p-4 md:p-6 overflow-hidden"
           >
             <h2 className="text-lg font-semibold mb-4">Account Information</h2>
             <div className="space-y-3">
@@ -327,7 +327,7 @@ export default function Settings() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
-            className="glass-card rounded-2xl p-6"
+            className="glass-card rounded-2xl p-3 sm:p-4 md:p-6 overflow-hidden"
           >
             <h2 className="text-lg font-semibold mb-4">Push Notifications</h2>
             <div className="space-y-3">
@@ -423,7 +423,7 @@ export default function Settings() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="glass-card rounded-2xl p-6"
+            className="glass-card rounded-2xl p-3 sm:p-4 md:p-6 overflow-hidden"
           >
             <h2 className="text-lg font-semibold mb-4">Actions</h2>
             <div className="space-y-3">
@@ -486,7 +486,7 @@ export default function Settings() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="glass-card rounded-2xl p-6"
+            className="glass-card rounded-2xl p-3 sm:p-4 md:p-6 overflow-hidden"
           >
             <h2 className="text-lg font-semibold mb-4">App Information</h2>
             <div className="space-y-2 text-sm text-muted-foreground">

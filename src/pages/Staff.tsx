@@ -252,31 +252,32 @@ export default function Staff() {
 
   return (
     <Layout>
-      <div className="min-h-screen p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+      <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto overflow-x-hidden">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">Staff Management</h1>
-            </div>
-            <RefreshButton onRefresh={loadStaff} />
-          </div>
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-muted-foreground">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-3 sm:mb-4">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-1 sm:mb-2">Staff Management</h1>
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 Manage your team members and their access
               </p>
             </div>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button onClick={handleCreate} className="gradient-primary shadow-md hover:shadow-lg">
-                <Plus className="w-4 h-4 mr-2" />
-                Add Staff
-              </Button>
-            </motion.div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex-shrink-0">
+                <RefreshButton onRefresh={loadStaff} />
+              </div>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="flex-1 sm:flex-initial min-w-0">
+                <Button onClick={handleCreate} className="w-full sm:w-auto gradient-primary shadow-md hover:shadow-lg text-xs sm:text-sm" size="sm">
+                  <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Add Staff</span>
+                  <span className="sm:hidden">Add</span>
+                </Button>
+              </motion.div>
+            </div>
           </div>
         </motion.div>
 
@@ -304,10 +305,10 @@ export default function Staff() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-glass-border">
-                    <th className="text-left p-4 font-semibold">Name</th>
-                    <th className="text-left p-4 font-semibold">Role</th>
-                    <th className="text-left p-4 font-semibold">PIN</th>
-                    <th className="text-right p-4 font-semibold">Actions</th>
+                    <th className="text-left p-2 sm:p-3 md:p-4 font-semibold text-xs sm:text-sm">Name</th>
+                    <th className="text-left p-2 sm:p-3 md:p-4 font-semibold text-xs sm:text-sm">Role</th>
+                    <th className="text-left p-2 sm:p-3 md:p-4 font-semibold text-xs sm:text-sm hidden sm:table-cell">PIN</th>
+                    <th className="text-right p-2 sm:p-3 md:p-4 font-semibold text-xs sm:text-sm">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -319,29 +320,29 @@ export default function Staff() {
                         transition={{ delay: index * 0.05 }}
                         className="border-b border-glass-border hover:bg-secondary/30 transition-colors"
                       >
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      <td className="p-2 sm:p-3 md:p-4">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                             staffMember.role === 'admin'
                               ? 'bg-primary/20 text-primary'
                               : 'bg-secondary text-secondary-foreground'
                           }`}>
                             {staffMember.role === 'admin' ? (
-                              <Shield className="w-5 h-5" />
+                              <Shield className="w-4 h-4 sm:w-5 sm:h-5" />
                             ) : (
-                              <User className="w-5 h-5" />
+                              <User className="w-4 h-4 sm:w-5 sm:h-5" />
                             )}
                           </div>
-                          <div>
-                            <p className="font-medium">{staffMember.name}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-xs sm:text-sm truncate">{staffMember.name}</p>
                             {staffMember.id === user.id && (
-                              <p className="text-xs text-muted-foreground">(You)</p>
+                              <p className="text-[10px] sm:text-xs text-muted-foreground">(You)</p>
                             )}
                           </div>
                         </div>
                       </td>
-                      <td className="p-4">
-                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
+                      <td className="p-2 sm:p-3 md:p-4">
+                        <span className={`inline-block px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${
                           staffMember.role === 'admin'
                             ? 'gradient-primary text-primary-foreground'
                             : 'bg-secondary text-secondary-foreground'
@@ -349,40 +350,40 @@ export default function Staff() {
                           {staffMember.role === 'admin' ? 'Administrator' : 'Employee'}
                         </span>
                       </td>
-                      <td className="p-4">
-                        <code className="px-3 py-1 rounded-lg bg-secondary text-sm font-mono">
+                      <td className="p-2 sm:p-3 md:p-4 hidden sm:table-cell">
+                        <code className="px-2 sm:px-3 py-1 rounded-lg bg-secondary text-xs sm:text-sm font-mono">
                           {staffMember.pin}
                         </code>
                       </td>
-                      <td className="p-4">
-                        <div className="flex justify-end gap-2">
+                      <td className="p-2 sm:p-3 md:p-4">
+                        <div className="flex justify-end gap-1 sm:gap-2 flex-wrap">
                           {staffMember.role === 'employee' && staffMember.baseSalary && (
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => setShowSalaryHistory(showSalaryHistory === staffMember.id ? null : staffMember.id)}
-                              className="h-8 w-8 p-0"
+                              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
                               title="View Salary History"
                             >
-                              <History className="w-4 h-4" />
+                              <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </Button>
                           )}
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleEdit(staffMember)}
-                            className="h-8 w-8 p-0"
+                            className="h-7 w-7 sm:h-8 sm:w-8 p-0"
                           >
-                            <Edit className="w-4 h-4" />
+                            <Edit className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                           </Button>
                           {staffMember.id !== user.id && (
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => handleDelete(staffMember)}
-                              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                              className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-destructive hover:text-destructive"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </Button>
                           )}
                         </div>
@@ -390,9 +391,9 @@ export default function Staff() {
                     </motion.tr>
                     {showSalaryHistory === staffMember.id && staffMember.role === 'employee' && (
                       <tr>
-                        <td colSpan={4} className="p-4 bg-secondary/20">
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between mb-3">
+                        <td colSpan={4} className="p-2 sm:p-3 md:p-4 bg-secondary/20">
+                          <div className="space-y-2 sm:space-y-3">
+                            <div className="flex items-center justify-between mb-2 sm:mb-3 gap-2">
                               <h4 className="font-semibold flex items-center gap-2">
                                 <History className="w-4 h-4" />
                                 Salary History - {staffMember.name}
