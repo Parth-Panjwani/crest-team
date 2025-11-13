@@ -12,6 +12,9 @@ export interface AttendancePunch {
   manualPunch?: boolean;
   punchedBy?: string;
   reason?: string;
+  remotePunch?: boolean;
+  location?: string;
+  selfieUrl?: string;
 }
 
 export interface AttendanceTotals {

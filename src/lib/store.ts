@@ -23,6 +23,9 @@ export interface Punch {
   manualPunch?: boolean; // true if punched by admin
   punchedBy?: string; // admin user ID who did the manual punch
   reason?: string; // reason for manual punch or break
+  remotePunch?: boolean; // true if punched from outside the store (home, remote location)
+  location?: string; // optional location description (e.g., "Home", "Remote", "On the way")
+  selfieUrl?: string; // URL of selfie image taken during punch
   status?: 'on-time' | 'late' | 'early' | 'overtime';
   statusMessage?: string;
   lateApprovalId?: string; // ID of late approval if this punch is late and needs approval
@@ -386,6 +389,16 @@ class Store {
         const leavesPayload = bootstrap.leaves ?? []
         const salariesPayload = bootstrap.salaries ?? []
         const attendancePayload = bootstrap.attendance ?? []
+        
+        // Debug: Log attendance data with selfies
+        attendancePayload.forEach(record => {
+          const punchesWithSelfies = record.punches?.filter(p => (p as any).selfieUrl) || [];
+          if (punchesWithSelfies.length > 0) {
+            console.log(`[Store] Bootstrap - Found ${punchesWithSelfies.length} punch(es) with selfies for user ${record.userId}:`, 
+              punchesWithSelfies.map(p => ({ type: p.type, selfieUrl: (p as any).selfieUrl }))
+            );
+          }
+        });
         const salaryHistoryPayload = bootstrap.salaryHistory ?? []
         const pendingAdvancesPayload = bootstrap.pendingAdvances ?? []
         const pendingStorePurchasesPayload =
@@ -418,10 +431,35 @@ class Store {
         this.attendance = attendancePayload.map((record) => ({
           ...record,
           punches: Array.isArray(record.punches)
-            ? record.punches.map((punch) => ({
-                ...punch,
-                at: new Date(punch.at),
-              }))
+            ? record.punches.map((punch: any) => {
+                // Preserve ALL fields from the punch, including selfieUrl
+                const parsedPunch = {
+                  ...punch, // Spread all fields first
+                  at: new Date(punch.at), // Then override 'at' with Date
+                };
+                // Explicitly preserve selfieUrl if it exists
+                if (punch.selfieUrl) {
+                  parsedPunch.selfieUrl = punch.selfieUrl;
+                }
+                // Debug: Log punches with selfies
+                if (parsedPunch.selfieUrl) {
+                  console.log(`[Store] ✅ Found punch with selfie:`, {
+                    type: parsedPunch.type,
+                    at: parsedPunch.at,
+                    selfieUrl: parsedPunch.selfieUrl,
+                    userId: record.userId,
+                    date: record.date,
+                    allKeys: Object.keys(parsedPunch)
+                  });
+                } else if (punch.selfieUrl) {
+                  console.warn(`[Store] ⚠️ Punch has selfieUrl in raw data but lost during parsing:`, {
+                    type: punch.type,
+                    rawSelfieUrl: punch.selfieUrl,
+                    parsedSelfieUrl: parsedPunch.selfieUrl
+                  });
+                }
+                return parsedPunch;
+              })
             : [],
           totals: record.totals ?? { workMin: 0, breakMin: 0 },
         }))
@@ -833,27 +871,108 @@ class Store {
     }
 
     // Sync punch to MongoDB
+    const punchPayload: any = {
+      userId,
+      type,
+    }
+    
+    if (options?.manualPunch) {
+      punchPayload.manualPunch = true
+      if (options.punchedBy) punchPayload.punchedBy = options.punchedBy
+    }
+    
+    if (options?.reason) punchPayload.reason = options.reason
+    if (options?.customTime) punchPayload.customTime = punchTime.toISOString()
+    if (options?.remotePunch) punchPayload.remotePunch = true
+    if (options?.location) punchPayload.location = options.location
+    if (options?.selfieUrl) {
+      punchPayload.selfieUrl = options.selfieUrl;
+      console.log('[Store] Adding selfieUrl to punch payload:', options.selfieUrl);
+    } else {
+      console.log('[Store] No selfieUrl in options:', options);
+    }
+    
+    console.log('[Store] Punch payload:', punchPayload);
+    
     const result = await this.syncToAPI<AttendancePayload>(
       "attendance/punch",
       "POST",
-      {
-        userId,
-        type,
-        manualPunch: options?.manualPunch || false,
-        punchedBy: options?.punchedBy,
-        reason: options?.reason,
-        customTime: options?.customTime?.toISOString(),
-      }
+      punchPayload
     )
+    
+    // Debug: Log the RAW API response before any processing
+    console.log('[Store] 🔍 RAW API response (before processing):', JSON.stringify(result, null, 2));
+    console.log('[Store] 🔍 RAW last punch in response:', result.punches.length > 0 ? JSON.stringify(result.punches[result.punches.length - 1], null, 2) : 'NO PUNCHES');
+    
+    // Debug: Log the API response
+    const punchesWithSelfies = result.punches.filter(p => (p as any).selfieUrl);
+    console.log('[Store] API response after punch:', {
+      id: result.id,
+      userId: result.userId,
+      date: result.date,
+      totalPunches: result.punches.length,
+      punchesWithSelfies: punchesWithSelfies.length,
+      allPunches: result.punches.map(p => ({
+        type: p.type,
+        at: p.at,
+        selfieUrl: (p as any).selfieUrl || 'NONE',
+        hasSelfieUrl: !!(p as any).selfieUrl,
+        allKeys: Object.keys(p)
+      }))
+    });
+    
+    if (punchesWithSelfies.length > 0) {
+      console.log('[Store] ✅ Found punches with selfies in API response:', punchesWithSelfies.map(p => ({
+        type: p.type,
+        at: p.at,
+        selfieUrl: (p as any).selfieUrl
+      })));
+    } else {
+      console.warn('[Store] ⚠️ No selfieUrl found in any punches from API response!');
+    }
+    
     // Auto-refresh after CRUD operation
     await this.refreshData()
-    return {
+    
+    // Format the result, explicitly preserving selfieUrl
+    const formattedResult = {
       ...result,
-      punches: result.punches.map((punch) => ({
-        ...punch,
-        at: new Date(punch.at),
-      })),
-    }
+      punches: result.punches.map((punch: any) => {
+        // Preserve ALL fields including selfieUrl
+        const formattedPunch: any = {
+          ...punch, // Spread all fields first
+          at: new Date(punch.at), // Then override 'at' with Date
+        };
+        // Explicitly preserve selfieUrl if it exists in the raw punch
+        if (punch.selfieUrl) {
+          formattedPunch.selfieUrl = punch.selfieUrl;
+        }
+        // Debug: Log if selfieUrl is preserved
+        if (punch.selfieUrl) {
+          console.log('[Store] ✅ Preserving selfieUrl in formatted punch:', {
+            type: formattedPunch.type,
+            at: formattedPunch.at,
+            selfieUrl: punch.selfieUrl,
+            hasSelfieUrl: !!formattedPunch.selfieUrl,
+            allKeys: Object.keys(formattedPunch)
+          });
+        } else {
+          // Debug: Log if selfieUrl was expected but missing
+          const lastPunch = result.punches[result.punches.length - 1];
+          if (punch === lastPunch && options?.selfieUrl) {
+            console.warn('[Store] ⚠️ selfieUrl was sent but not in API response:', {
+              type: formattedPunch.type,
+              sentSelfieUrl: options.selfieUrl,
+              receivedSelfieUrl: punch.selfieUrl,
+              allKeys: Object.keys(punch)
+            });
+          }
+        }
+        return formattedPunch;
+      }),
+    };
+    
+    return formattedResult;
   }
 
   private calculateTotals(att: Attendance) {

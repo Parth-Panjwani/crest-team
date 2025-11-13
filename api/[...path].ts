@@ -457,12 +457,20 @@ const handleAttendance: ApiHandler = async (req, res, context) => {
     }
 
     const body = getRequestBody(req);
+    console.log('[API] 📥 Request body received:', JSON.stringify(body, null, 2));
+    console.log('[API] 📥 body.selfieUrl type:', typeof body.selfieUrl, 'value:', body.selfieUrl);
+    
     const userId = getString(body.userId);
     const type = getString(body.type) as AttendancePunchType | undefined;
     const manualPunch = getBoolean(body.manualPunch) ?? false;
     const punchedBy = getString(body.punchedBy);
     const reason = getString(body.reason);
     const customTime = getString(body.customTime);
+    const remotePunch = getBoolean(body.remotePunch) ?? false;
+    const location = getString(body.location);
+    const selfieUrl = getString(body.selfieUrl);
+    
+    console.log('[API] 📥 Extracted selfieUrl:', selfieUrl, 'type:', typeof selfieUrl);
 
     if (!userId || !type) {
       return json(res, 400, { error: 'userId and type are required' });
@@ -508,12 +516,88 @@ const handleAttendance: ApiHandler = async (req, res, context) => {
         newPunch.reason = reason;
       }
     }
+    
+    if (remotePunch) {
+      newPunch.remotePunch = true;
+    }
+    
+    if (location) {
+      newPunch.location = location;
+    }
+    
+    // Store reason for break punches or remote check-ins
+    if ((type === 'BREAK_START' || type === 'BREAK_END' || remotePunch) && reason) {
+      newPunch.reason = reason;
+    }
+    
+    // Add selfieUrl - MUST be after all other fields to ensure it's not overwritten
+    if (selfieUrl) {
+      newPunch.selfieUrl = selfieUrl;
+      console.log('[API] ✅ Adding selfieUrl to newPunch:', selfieUrl);
+      console.log('[API] ✅ newPunch object keys before save:', Object.keys(newPunch));
+    } else {
+      console.log('[API] ⚠️ No selfieUrl provided. selfieUrl value:', selfieUrl);
+    }
 
+    console.log('[API] New punch object (full):', JSON.stringify(newPunch, null, 2));
+
+    // Debug: Verify newPunch has selfieUrl before pushing
+    console.log('[API] 🔍 newPunch before push - has selfieUrl:', !!(newPunch as any).selfieUrl, 'value:', (newPunch as any).selfieUrl);
+    console.log('[API] 🔍 newPunch keys before push:', Object.keys(newPunch));
+    
     punches.push(newPunch);
+    
+    // Debug: Verify the punch in the array has selfieUrl
+    const lastPunch = punches[punches.length - 1];
+    console.log('[API] 🔍 Last punch in array - has selfieUrl:', !!(lastPunch as any).selfieUrl, 'value:', (lastPunch as any).selfieUrl);
+    console.log('[API] 🔍 Last punch keys:', Object.keys(lastPunch));
+    
     const totals = calculateTotals(punches);
+
+    console.log('[API] 🔍 About to save to MongoDB. Total punches:', punches.length);
+    console.log('[API] 🔍 Last punch in punches array before save:', JSON.stringify(lastPunch, null, 2));
 
     await attendanceCollection.updateOne({ id: attendance.id }, { $set: { punches, totals } });
     const updated = await attendanceCollection.findOne({ id: attendance.id });
+    
+    console.log('[API] 🔍 After MongoDB update - updated document exists:', !!updated);
+    
+    // Debug: Check raw MongoDB document
+    const rawDoc = await attendanceCollection.findOne({ id: attendance.id });
+    const lastRawPunch = Array.isArray(rawDoc?.punches) ? rawDoc.punches[rawDoc.punches.length - 1] : null;
+    console.log('[API] 🔍 Raw MongoDB last punch:', lastRawPunch ? {
+      type: lastRawPunch.type,
+      at: lastRawPunch.at,
+      selfieUrl: (lastRawPunch as any).selfieUrl,
+      allKeys: Object.keys(lastRawPunch || {})
+    } : 'NOT FOUND');
+    
+    console.log('[API] Updated attendance punches (all):', updated?.punches?.map((p: any) => ({ 
+      type: p.type, 
+      at: p.at, 
+      selfieUrl: p.selfieUrl || 'MISSING',
+      hasSelfieUrl: !!p.selfieUrl,
+      allKeys: Object.keys(p || {})
+    })));
+    
+    // Debug: Check formatted attendance
+    const formatted = formatAttendance(updated!);
+    const lastFormattedPunch = formatted.punches[formatted.punches.length - 1];
+    console.log('[API] 🔍 Formatted last punch:', {
+      type: lastFormattedPunch.type,
+      at: lastFormattedPunch.at,
+      selfieUrl: (lastFormattedPunch as any).selfieUrl || 'MISSING',
+      hasSelfieUrl: !!(lastFormattedPunch as any).selfieUrl,
+      allKeys: Object.keys(lastFormattedPunch)
+    });
+    
+    console.log('[API] Formatted attendance punches (all):', formatted.punches.map((p: any) => ({
+      type: p.type,
+      at: p.at,
+      selfieUrl: p.selfieUrl || 'MISSING',
+      hasSelfieUrl: !!p.selfieUrl,
+      allKeys: Object.keys(p)
+    })));
     
     // Send push notifications to admins for attendance actions (except manual punches by admin)
     if ((type === 'IN' || type === 'OUT' || type === 'BREAK_START' || type === 'BREAK_END') && !manualPunch) {
@@ -581,7 +665,18 @@ const handleAttendance: ApiHandler = async (req, res, context) => {
       }
     }
     
-    return json(res, 200, formatAttendance(updated));
+    // Final check before returning
+    const finalFormatted = formatAttendance(updated);
+    const finalLastPunch = finalFormatted.punches[finalFormatted.punches.length - 1];
+    console.log('[API] 🚀 FINAL RESPONSE - Last punch:', {
+      type: finalLastPunch.type,
+      at: finalLastPunch.at,
+      selfieUrl: (finalLastPunch as any).selfieUrl || 'MISSING IN FINAL RESPONSE',
+      hasSelfieUrl: !!(finalLastPunch as any).selfieUrl,
+      allKeys: Object.keys(finalLastPunch)
+    });
+    
+    return json(res, 200, finalFormatted);
   }
 
   if (action === 'today' && context.segments[2]) {

@@ -61,7 +61,7 @@ function calculateTotals(punches: AttendancePunch[]): { workMin: number; breakMi
 // Punch attendance
 router.post('/punch', async (req, res) => {
   try {
-    const { userId, type, manualPunch, punchedBy, reason, customTime } = req.body;
+    const { userId, type, manualPunch, punchedBy, reason, customTime, remotePunch, location, selfieUrl } = req.body;
     if (!userId || !type) {
       return res.status(400).json({ error: 'userId and type are required' });
     }
@@ -128,9 +128,23 @@ router.post('/punch', async (req, res) => {
       if (reason) newPunch.reason = reason;
     }
 
-    // Store reason for break punches
-    if ((type === 'BREAK_START' || type === 'BREAK_END') && reason) {
+    if (remotePunch) {
+      newPunch.remotePunch = true;
+    }
+
+    if (location) {
+      newPunch.location = location;
+    }
+
+    // Store reason for break punches or remote check-ins
+    if ((type === 'BREAK_START' || type === 'BREAK_END' || remotePunch) && reason) {
       newPunch.reason = reason;
+    }
+
+    // Add selfieUrl if provided
+    if (selfieUrl) {
+      newPunch.selfieUrl = selfieUrl;
+      console.log('[Server] ✅ Adding selfieUrl to newPunch:', selfieUrl);
     }
 
     // If this is a late check-in, check for permission and create approval if needed

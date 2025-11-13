@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle, Bell, AlertTriangle, Trash2 } from 'lucide-react';
+import { Calendar, Clock, Coffee, Users, Filter, CheckCircle2, XCircle, Timer, UserPlus, Edit, AlertCircle, Bell, AlertTriangle, Trash2, Camera, ZoomIn, Loader2, X } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Attendance as AttendanceType, User, STORE_TIMINGS, Punch } from '@/lib/store';
 import { formatMinutesToHours } from '@/utils/timeFormat';
@@ -43,6 +43,144 @@ import { useToast } from '@/hooks/use-toast';
 import { useStore } from '@/hooks/useStore';
 import { RefreshButton } from '@/components/RefreshButton';
 import { TeamAttendanceCard } from '@/components/TeamAttendanceCard';
+
+// Helper function to get presigned URL for a file
+async function getPresignedFileUrl(fileKey: string, expiresIn: number = 3600): Promise<string | null> {
+  try {
+    const apiBase = import.meta.env.VITE_API_URL || ""
+    const url = apiBase
+      ? `${apiBase}/api/files/${encodeURIComponent(fileKey)}?expiresIn=${expiresIn}`
+      : `/api/files/${encodeURIComponent(fileKey)}?expiresIn=${expiresIn}`
+    
+    const response = await fetch(url)
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data.url
+    } else {
+      const errorText = await response.text();
+      console.error(`[getPresignedFileUrl] Error response (${response.status}):`, errorText);
+      return null
+    }
+  } catch (err) {
+    console.error("[getPresignedFileUrl] Exception:", err)
+    return null
+  }
+}
+
+// Component to display selfie image
+function SelfieImage({ selfieUrl, punchType }: { selfieUrl: string; punchType: string }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showFullscreen, setShowFullscreen] = useState(false);
+
+  useEffect(() => {
+    const loadImage = async () => {
+      if (!selfieUrl) {
+        setError(true);
+        setErrorMessage('No selfie URL provided');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(false);
+      setErrorMessage(null);
+      
+      // Check if it's an S3 key (starts with "uploads/")
+      const isS3Key = selfieUrl.startsWith('uploads/');
+      
+      if (isS3Key) {
+        // For S3 keys, get presigned URL
+        const presignedUrl = await getPresignedFileUrl(selfieUrl, 3600);
+        if (presignedUrl) {
+          setImageUrl(presignedUrl);
+          setLoading(false);
+        } else {
+          console.error(`[SelfieImage] ${punchType}: Failed to get presigned URL for:`, selfieUrl);
+          setError(true);
+          setErrorMessage('Failed to load image');
+          setLoading(false);
+        }
+      } else {
+        // For direct URLs, use as-is
+        setImageUrl(selfieUrl);
+        setLoading(false);
+      }
+    };
+
+    loadImage();
+  }, [selfieUrl, punchType]);
+
+  if (error) {
+    return (
+      <div className="w-full h-24 sm:h-32 flex flex-col items-center justify-center bg-destructive/10 border-2 border-destructive/30 rounded-lg p-2">
+        <Camera className="w-6 h-6 sm:w-8 sm:h-8 text-destructive mb-1" />
+        <p className="text-[10px] sm:text-xs text-destructive text-center">{errorMessage || 'Failed to load image'}</p>
+      </div>
+    );
+  }
+
+  if (loading || !imageUrl) {
+    return (
+      <div className="w-full h-24 sm:h-32 flex flex-col items-center justify-center bg-secondary/20 border-2 border-primary/30 rounded-lg">
+        <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-primary mb-1" />
+        <p className="text-[10px] sm:text-xs text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div 
+        className="relative w-full h-24 sm:h-32 rounded-lg overflow-hidden border-2 border-primary/30 cursor-pointer hover:opacity-90 hover:border-primary transition-all group shadow-md"
+        onClick={() => setShowFullscreen(true)}
+      >
+        <img
+          src={imageUrl}
+          alt={`${punchType} selfie`}
+          className="w-full h-full object-cover"
+          onError={(e) => {
+            console.error(`[SelfieImage] ${punchType}: Image failed to load:`, e);
+            setError(true);
+            setErrorMessage('Image failed to load');
+          }}
+        />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+          <ZoomIn className="w-3 h-3 sm:w-4 sm:h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+        <div className="absolute top-1 right-1 bg-black/50 rounded-full p-0.5 sm:p-1">
+          <Camera className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
+        </div>
+      </div>
+
+      {/* Fullscreen Modal */}
+      {showFullscreen && (
+        <Dialog open={showFullscreen} onOpenChange={setShowFullscreen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+            <div className="relative">
+              <img
+                src={imageUrl}
+                alt={`${punchType} selfie - Full view`}
+                className="w-full h-auto max-h-[90vh] object-contain"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white"
+                onClick={() => setShowFullscreen(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
 
 export default function Attendance() {
   // Subscribe to store updates to force re-renders when data changes
@@ -950,13 +1088,13 @@ export default function Attendance() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4 w-full">
                       <div className="w-full min-w-0">
                     <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                          <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
-                        <SelectValue placeholder="Select employee" />
+                          <SelectTrigger className="w-full text-xs sm:text-sm h-10 sm:h-11 min-w-0 overflow-hidden">
+                        <SelectValue placeholder="Select employee" className="truncate" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-h-[300px] overflow-y-auto">
                             <SelectItem value="all" className="text-xs sm:text-sm">All Employees</SelectItem>
                         {allEmployees.map((u) => (
-                              <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm">
+                              <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm truncate">
                             {u.name}
                           </SelectItem>
                         ))}
@@ -969,7 +1107,7 @@ export default function Attendance() {
                       type="date"
                       value={selectedDate}
                       onChange={(e) => setSelectedDate(e.target.value)}
-                          className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                          className="w-full px-3 sm:px-4 py-2.5 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-10 sm:h-11 min-w-0"
                     />
                   </div>
 
@@ -1308,10 +1446,10 @@ export default function Attendance() {
                       <div className="w-full min-w-0">
                         <Label className="text-xs sm:text-sm mb-2 block">Time Period</Label>
                         <Select value={insightsPeriod} onValueChange={(v) => setInsightsPeriod(v as '1week' | '1month' | 'overall' | 'custom')}>
-                          <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
-                            <SelectValue />
+                          <SelectTrigger className="w-full text-xs sm:text-sm h-10 sm:h-11 min-w-0">
+                            <SelectValue className="truncate" />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className="max-h-[300px] overflow-y-auto">
                             <SelectItem value="1week" className="text-xs sm:text-sm">Last 1 Week</SelectItem>
                             <SelectItem value="1month" className="text-xs sm:text-sm">Last 1 Month</SelectItem>
                             <SelectItem value="overall" className="text-xs sm:text-sm">Overall</SelectItem>
@@ -1328,7 +1466,7 @@ export default function Attendance() {
                               type="date"
                               value={customStartDate}
                               onChange={(e) => setCustomStartDate(e.target.value)}
-                              className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                              className="w-full px-3 sm:px-4 py-2.5 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-10 sm:h-11 min-w-0"
                             />
                           </div>
                           <div className="w-full min-w-0">
@@ -1337,7 +1475,7 @@ export default function Attendance() {
                               type="date"
                               value={customEndDate}
                               onChange={(e) => setCustomEndDate(e.target.value)}
-                              className="w-full px-2 sm:px-3 md:px-4 py-2 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-9 sm:h-10"
+                              className="w-full px-3 sm:px-4 py-2.5 rounded-lg sm:rounded-xl border border-glass-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 text-xs sm:text-sm h-10 sm:h-11 min-w-0"
                             />
                           </div>
                         </>
@@ -1346,10 +1484,10 @@ export default function Attendance() {
                       <div className="w-full min-w-0">
                         <Label className="text-xs sm:text-sm mb-2 block">View Type</Label>
                         <Select value={insightsView} onValueChange={(v) => setInsightsView(v as 'overall' | 'employee-wise')}>
-                          <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
-                            <SelectValue />
+                          <SelectTrigger className="w-full text-xs sm:text-sm h-10 sm:h-11 min-w-0">
+                            <SelectValue className="truncate" />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className="max-h-[300px] overflow-y-auto">
                             <SelectItem value="overall" className="text-xs sm:text-sm">Overall</SelectItem>
                             <SelectItem value="employee-wise" className="text-xs sm:text-sm">Employee-wise</SelectItem>
                           </SelectContent>
@@ -1360,12 +1498,12 @@ export default function Attendance() {
                         <div className="w-full min-w-0 sm:col-span-2 lg:col-span-1">
                           <Label className="text-xs sm:text-sm mb-2 block">Select Employee</Label>
                           <Select value={selectedInsightEmployee} onValueChange={setSelectedInsightEmployee}>
-                            <SelectTrigger className="w-full text-xs sm:text-sm h-9 sm:h-10">
-                              <SelectValue placeholder="Select employee" />
+                            <SelectTrigger className="w-full text-xs sm:text-sm h-10 sm:h-11 min-w-0 overflow-hidden">
+                              <SelectValue placeholder="Select employee" className="truncate" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="max-h-[300px] overflow-y-auto">
                               {allEmployees.map((u) => (
-                                <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm">
+                                <SelectItem key={u.id} value={u.id} className="text-xs sm:text-sm truncate">
                                   {u.name}
                                 </SelectItem>
                               ))}
@@ -1614,8 +1752,19 @@ export default function Attendance() {
                         {/* Daily Attendance Cards */}
                         <div className="space-y-3 sm:space-y-4">
                           {employeeData.map((att, idx) => {
-                            const checkIn = att.punches.find(p => p.type === 'IN');
-                            const checkOut = att.punches.find(p => p.type === 'OUT');
+                            // Get the latest check-in and check-out punches (in case of multiple)
+                            const checkInPunches = att.punches.filter(p => p.type === 'IN').sort((a, b) => {
+                              const dateA = typeof a.at === 'string' ? new Date(a.at).getTime() : a.at.getTime();
+                              const dateB = typeof b.at === 'string' ? new Date(b.at).getTime() : b.at.getTime();
+                              return dateB - dateA;
+                            });
+                            const checkOutPunches = att.punches.filter(p => p.type === 'OUT').sort((a, b) => {
+                              const dateA = typeof a.at === 'string' ? new Date(a.at).getTime() : a.at.getTime();
+                              const dateB = typeof b.at === 'string' ? new Date(b.at).getTime() : b.at.getTime();
+                              return dateB - dateA;
+                            });
+                            const checkIn = checkInPunches[0];
+                            const checkOut = checkOutPunches[0];
                             
                             let checkInStatus: 'on-time' | 'late' | 'early' | null = null;
                             let checkOutStatus: 'on-time' | 'early' | 'overtime' | null = null;
@@ -1690,7 +1839,7 @@ export default function Attendance() {
                                   </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-3 sm:mb-4">
                                   <div className="glass-card rounded-lg sm:rounded-xl p-2 sm:p-3 border border-glass-border">
                                     <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-1">Work Time</p>
                                     <p className="text-sm sm:text-base font-bold">
@@ -1723,6 +1872,30 @@ export default function Attendance() {
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Selfie Images Section */}
+                                {(checkIn?.selfieUrl || checkOut?.selfieUrl) && (
+                                  <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-glass-border">
+                                    <p className="text-xs sm:text-sm font-semibold text-muted-foreground mb-2 sm:mb-3 flex items-center gap-1.5 sm:gap-2">
+                                      <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      Verification Selfies
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                                      {checkIn?.selfieUrl && (
+                                        <div>
+                                          <p className="text-[10px] sm:text-xs text-muted-foreground mb-1.5 sm:mb-2 font-medium">Check-In Selfie</p>
+                                          <SelfieImage selfieUrl={checkIn.selfieUrl} punchType="Check-In" />
+                                        </div>
+                                      )}
+                                      {checkOut?.selfieUrl && (
+                                        <div>
+                                          <p className="text-[10px] sm:text-xs text-muted-foreground mb-1.5 sm:mb-2 font-medium">Check-Out Selfie</p>
+                                          <SelfieImage selfieUrl={checkOut.selfieUrl} punchType="Check-Out" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </motion.div>
                             );
                           })}

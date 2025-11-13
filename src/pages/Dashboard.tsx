@@ -37,6 +37,7 @@ import { formatMinutesToHours } from "@/utils/timeFormat"
 import { useStore } from "@/hooks/useStore"
 import { RefreshButton } from "@/components/RefreshButton"
 import { TeamAttendanceCard } from "@/components/TeamAttendanceCard"
+import { SelfieCapture } from "@/components/SelfieCapture"
 
 export default function Dashboard() {
   // Subscribe to store updates to force re-renders when data changes
@@ -59,6 +60,14 @@ export default function Dashboard() {
   const [pendingBreakType, setPendingBreakType] = useState<
     "BREAK_START" | "BREAK_END" | null
   >(null)
+  const [remoteCheckInDialogOpen, setRemoteCheckInDialogOpen] = useState(false)
+  const [remoteCheckInReason, setRemoteCheckInReason] = useState("")
+  const [remoteCheckInLocation, setRemoteCheckInLocation] = useState("")
+  const [checkInSelfieDialogOpen, setCheckInSelfieDialogOpen] = useState(false)
+  const [checkOutSelfieDialogOpen, setCheckOutSelfieDialogOpen] = useState(false)
+  const [breakSelfieDialogOpen, setBreakSelfieDialogOpen] = useState(false)
+  const [pendingSelfieUrl, setPendingSelfieUrl] = useState<string | null>(null)
+  const [pendingPunchType, setPendingPunchType] = useState<'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END' | null>(null)
   const [pendingApprovals, setPendingApprovals] = useState<LateApproval[]>([])
   const [pendingPermissions, setPendingPermissions] = useState<
     LatePermission[]
@@ -408,12 +417,33 @@ export default function Dashboard() {
 
   const realTimeTotals = calculateRealTimeWork()
 
-  const handleCheckIn = async () => {
+  const handleCheckInClick = () => {
+    setPendingPunchType('IN')
+    setCheckInSelfieDialogOpen(true)
+  }
+
+  const handleCheckIn = async (isRemote: boolean = false, reason?: string, location?: string, selfieUrl?: string) => {
+    console.log('[Dashboard] handleCheckIn called with:', { isRemote, reason, location, selfieUrl });
     try {
-      await store.punch(user.id, "IN")
+      await store.punch(user.id, "IN", {
+        remotePunch: isRemote,
+        reason: reason,
+        location: location,
+        selfieUrl: selfieUrl,
+      })
       // Store will auto-refresh via WebSocket, but refresh immediately for instant feedback
       await store.refreshData()
-      toast({ title: "Checked In", description: "Have a productive day!" })
+      toast({ 
+        title: "Checked In", 
+        description: isRemote ? "Remote check-in recorded. Safe travels!" : "Have a productive day!" 
+      })
+      if (isRemote) {
+        setRemoteCheckInDialogOpen(false)
+        setRemoteCheckInReason("")
+        setRemoteCheckInLocation("")
+      }
+      setCheckInSelfieDialogOpen(false)
+      setPendingSelfieUrl(null)
     } catch (error) {
       toast({
         title: "Error",
@@ -424,12 +454,21 @@ export default function Dashboard() {
     }
   }
 
-  const handleCheckOut = async () => {
+  const handleCheckOutClick = () => {
+    setPendingPunchType('OUT')
+    setCheckOutSelfieDialogOpen(true)
+  }
+
+  const handleCheckOut = async (selfieUrl?: string) => {
     try {
-      await store.punch(user.id, "OUT")
+      await store.punch(user.id, "OUT", {
+        selfieUrl: selfieUrl,
+      })
       // Store will auto-refresh via WebSocket, but refresh immediately for instant feedback
       await store.refreshData()
       toast({ title: "Checked Out", description: "See you tomorrow!" })
+      setCheckOutSelfieDialogOpen(false)
+      setPendingSelfieUrl(null)
     } catch (error) {
       toast({
         title: "Error",
@@ -443,16 +482,16 @@ export default function Dashboard() {
   const handleBreakStart = () => {
     setPendingBreakType("BREAK_START")
     setBreakReason("")
-    setBreakReasonDialogOpen(true)
+    setBreakSelfieDialogOpen(true)
   }
 
   const handleBreakEnd = () => {
     setPendingBreakType("BREAK_END")
     setBreakReason("")
-    setBreakReasonDialogOpen(true)
+    setBreakSelfieDialogOpen(true)
   }
 
-  const confirmBreakPunch = async () => {
+  const confirmBreakPunch = async (selfieUrl?: string) => {
     if (!pendingBreakType || !user) return
     // Only require reason for break start, not break end
     if (pendingBreakType === "BREAK_START" && !breakReason.trim()) {
@@ -467,7 +506,10 @@ export default function Dashboard() {
       await store.punch(
         user.id,
         pendingBreakType,
-        breakReason.trim() ? { reason: breakReason.trim() } : undefined
+        {
+          reason: breakReason.trim() || undefined,
+          selfieUrl: selfieUrl,
+        }
       )
       // Store will auto-refresh via WebSocket, but refresh immediately for instant feedback
       await store.refreshData()
@@ -480,8 +522,10 @@ export default function Dashboard() {
             : "Back to work!",
       })
       setBreakReasonDialogOpen(false)
+      setBreakSelfieDialogOpen(false)
       setBreakReason("")
       setPendingBreakType(null)
+      setPendingSelfieUrl(null)
     } catch (error) {
       toast({
         title: "Error",
@@ -1173,19 +1217,35 @@ export default function Dashboard() {
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-3">
               {status === "not-checked-in" && (
-                <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="col-span-2"
-                >
-                  <Button
-                    onClick={handleCheckIn}
-                    className="w-full h-14 text-lg gradient-primary shadow-md hover:shadow-lg"
+                <>
+                  <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="col-span-2 sm:col-span-1"
                   >
-                    <Clock className="mr-2 w-5 h-5" />
-                    Check In
-                  </Button>
-                </motion.div>
+                    <Button
+                      onClick={handleCheckInClick}
+                      className="w-full h-14 text-lg gradient-primary shadow-md hover:shadow-lg"
+                    >
+                      <Clock className="mr-2 w-5 h-5" />
+                      Check In
+                    </Button>
+                  </motion.div>
+                  <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="col-span-2 sm:col-span-1"
+                  >
+                    <Button
+                      onClick={() => setRemoteCheckInDialogOpen(true)}
+                      variant="outline"
+                      className="w-full h-14 text-lg border-2 hover:bg-primary/10"
+                    >
+                      <Clock className="mr-2 w-5 h-5" />
+                      Remote Check In
+                    </Button>
+                  </motion.div>
+                </>
               )}
 
               {status === "checked-in" && (
@@ -1208,7 +1268,7 @@ export default function Dashboard() {
                     whileTap={{ scale: 0.98 }}
                   >
                     <Button
-                      onClick={handleCheckOut}
+                      onClick={handleCheckOutClick}
                       variant="outline"
                       className="w-full h-14"
                     >
@@ -1238,7 +1298,7 @@ export default function Dashboard() {
                     whileTap={{ scale: 0.98 }}
                   >
                     <Button
-                      onClick={handleCheckOut}
+                      onClick={handleCheckOutClick}
                       variant="outline"
                       className="w-full h-14"
                     >
@@ -1256,7 +1316,7 @@ export default function Dashboard() {
                   className="col-span-2"
                 >
                   <Button
-                    onClick={handleCheckIn}
+                    onClick={handleCheckInClick}
                     className="w-full h-14 gradient-primary shadow-md hover:shadow-lg"
                   >
                     <Clock className="mr-2 w-5 h-5" />
@@ -1381,6 +1441,44 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* Break Selfie Dialog */}
+      <Dialog
+        open={breakSelfieDialogOpen}
+        onOpenChange={setBreakSelfieDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>
+              {pendingBreakType === "BREAK_START" ? "Start Break" : "End Break"}
+            </DialogTitle>
+            <DialogDescription>
+              {pendingBreakType === "BREAK_START"
+                ? "Take a selfie and provide a reason for this break"
+                : "Take a selfie to end your break"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <SelfieCapture
+              onCapture={(selfieUrl) => {
+                setPendingSelfieUrl(selfieUrl)
+                if (pendingBreakType === "BREAK_START") {
+                  setBreakReasonDialogOpen(true)
+                  setBreakSelfieDialogOpen(false)
+                } else {
+                  confirmBreakPunch(selfieUrl)
+                }
+              }}
+              onCancel={() => {
+                setBreakSelfieDialogOpen(false)
+                setPendingBreakType(null)
+              }}
+              title={pendingBreakType === "BREAK_START" ? "Take Selfie for Break Start" : "Take Selfie for Break End"}
+              required={true}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Break Reason Dialog */}
       <Dialog
         open={breakReasonDialogOpen}
@@ -1388,26 +1486,16 @@ export default function Dashboard() {
       >
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>
-              {pendingBreakType === "BREAK_START" ? "Start Break" : "End Break"}
-            </DialogTitle>
+            <DialogTitle>Break Reason</DialogTitle>
             <DialogDescription>
-              {pendingBreakType === "BREAK_START"
-                ? "Please provide a reason for this break"
-                : "Optionally provide a reason for ending the break"}
+              Please provide a reason for this break
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <Label>
-                Reason {pendingBreakType === "BREAK_START" ? "*" : "(Optional)"}
-              </Label>
+              <Label>Reason *</Label>
               <Textarea
-                placeholder={
-                  pendingBreakType === "BREAK_START"
-                    ? "e.g., Lunch break, Personal break, etc."
-                    : "Enter reason (optional)"
-                }
+                placeholder="e.g., Lunch break, Personal break, etc."
                 value={breakReason}
                 onChange={(e) => setBreakReason(e.target.value)}
                 rows={3}
@@ -1422,18 +1510,135 @@ export default function Dashboard() {
                 setBreakReasonDialogOpen(false)
                 setBreakReason("")
                 setPendingBreakType(null)
+                setPendingSelfieUrl(null)
               }}
             >
               Cancel
             </Button>
             <Button
-              onClick={confirmBreakPunch}
-              disabled={
-                pendingBreakType === "BREAK_START" && !breakReason.trim()
-              }
+              onClick={() => confirmBreakPunch(pendingSelfieUrl || undefined)}
+              disabled={!breakReason.trim()}
               className="gradient-primary"
             >
-              {pendingBreakType === "BREAK_START" ? "Start Break" : "End Break"}
+              Start Break
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Check-In Selfie Dialog */}
+      <Dialog
+        open={checkInSelfieDialogOpen}
+        onOpenChange={setCheckInSelfieDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Check In</DialogTitle>
+            <DialogDescription>
+              Take a selfie to check in
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <SelfieCapture
+              onCapture={(selfieUrl) => {
+                console.log('[Dashboard] SelfieCapture onCapture called with selfieUrl:', selfieUrl);
+                handleCheckIn(false, undefined, undefined, selfieUrl)
+              }}
+              onCancel={() => {
+                setCheckInSelfieDialogOpen(false)
+                setPendingPunchType(null)
+              }}
+              title="Take Selfie for Check In"
+              required={true}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Check-Out Selfie Dialog */}
+      <Dialog
+        open={checkOutSelfieDialogOpen}
+        onOpenChange={setCheckOutSelfieDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Check Out</DialogTitle>
+            <DialogDescription>
+              Take a selfie to check out
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <SelfieCapture
+              onCapture={(selfieUrl) => {
+                handleCheckOut(selfieUrl)
+              }}
+              onCancel={() => {
+                setCheckOutSelfieDialogOpen(false)
+                setPendingPunchType(null)
+              }}
+              title="Take Selfie for Check Out"
+              required={true}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remote Check-In Dialog */}
+      <Dialog
+        open={remoteCheckInDialogOpen}
+        onOpenChange={setRemoteCheckInDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Remote Check-In</DialogTitle>
+            <DialogDescription>
+              Check in from outside the store (home, on the way, etc.). This is useful when you know you'll be late.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Location (Optional)</Label>
+              <Textarea
+                placeholder="e.g., Home, On the way, Remote location, etc."
+                value={remoteCheckInLocation}
+                onChange={(e) => setRemoteCheckInLocation(e.target.value)}
+                rows={2}
+                className="mt-2"
+              />
+            </div>
+            <div>
+              <Label>Reason (Optional)</Label>
+              <Textarea
+                placeholder="e.g., Running late, Working from home, Traffic, etc."
+                value={remoteCheckInReason}
+                onChange={(e) => setRemoteCheckInReason(e.target.value)}
+                rows={3}
+                className="mt-2"
+              />
+            </div>
+            <SelfieCapture
+              onCapture={(selfieUrl) => {
+                handleCheckIn(true, remoteCheckInReason.trim() || undefined, remoteCheckInLocation.trim() || undefined, selfieUrl)
+              }}
+              onCancel={() => {
+                setRemoteCheckInDialogOpen(false)
+                setRemoteCheckInReason("")
+                setRemoteCheckInLocation("")
+              }}
+              title="Take Selfie for Remote Check In"
+              required={true}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRemoteCheckInDialogOpen(false)
+                setRemoteCheckInReason("")
+                setRemoteCheckInLocation("")
+              }}
+            >
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1466,13 +1671,15 @@ export default function Dashboard() {
                   )}{" "}
                   ({formatMinutesToHours(selectedApproval.lateByMinutes)} late)
                   {selectedApproval.hasPermission && " (has permission)"}
-                  <p className="text-xs text-muted-foreground mt-2 italic">
-                    Note: Work time is calculated from actual check-in time, not
-                    approval time
-                  </p>
                 </>
               )}
             </DialogDescription>
+            {selectedApproval && (
+              <div className="text-xs text-muted-foreground mt-2 italic">
+                Note: Work time is calculated from actual check-in time, not
+                approval time
+              </div>
+            )}
           </DialogHeader>
           <div className="space-y-4 py-4">
             {approvalAction === "reject" && (

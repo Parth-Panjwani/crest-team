@@ -8,6 +8,9 @@ export interface AttendancePunch {
   manualPunch?: boolean;
   punchedBy?: string;
   reason?: string;
+  remotePunch?: boolean;
+  location?: string;
+  selfieUrl?: string;
   status?: 'on-time' | 'late' | 'early' | 'overtime';
   statusMessage?: string;
   lateApprovalId?: string; // ID of late approval if this punch is late and needs approval
