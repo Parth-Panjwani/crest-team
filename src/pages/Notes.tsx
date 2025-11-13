@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { useStore } from '@/hooks/useStore';
-import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter, Package, PackageX, PackageCheck, ChevronRight, Image as ImageIcon, X, Upload, Loader2 } from 'lucide-react';
+import { Plus, Search, Check, Edit, Trash2, FileText, List, ListOrdered, Type, Eye, EyeOff, RotateCcw, Trash, Filter, Package, PackageX, PackageCheck, ChevronRight, Image as ImageIcon, X, Upload, Loader2, ZoomIn, ZoomOut, Download } from 'lucide-react';
 import { Layout } from '@/components/Layout';
 import { store, Note } from '@/lib/store';
 import { Button } from '@/components/ui/button';
@@ -81,7 +81,13 @@ function extractS3Key(imageUrl: string): string {
 }
 
 // Component to display note image with presigned URL
-function NoteImage({ imageUrl: imageUrlOrKey }: { imageUrl: string }) {
+function NoteImage({ 
+  imageUrl: imageUrlOrKey, 
+  onClick 
+}: { 
+  imageUrl: string
+  onClick?: () => void
+}) {
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -177,38 +183,48 @@ function NoteImage({ imageUrl: imageUrlOrKey }: { imageUrl: string }) {
   }
 
   return (
-    <div className="mb-2 relative">
+    <div 
+      className={`mb-2 relative ${onClick ? 'cursor-pointer group' : ''}`}
+      onClick={onClick}
+    >
       {loading && (
         <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center rounded-lg z-10">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       )}
-      <img
-        src={displayUrl}
-        alt="Note attachment"
-        className="w-full max-h-64 object-contain rounded-lg border border-glass-border"
-        style={{ display: loading ? "none" : "block" }}
-        onLoad={() => {
-          setLoading(false)
-          setError(false)
-        }}
-        onError={async () => {
-          // Retry with presigned URL if direct load fails
-          if (displayUrl && !displayUrl.includes('X-Amz-Signature')) {
-            const key = extractS3Key(imageUrlOrKey)
-            const presignedUrl = await getPresignedFileUrl(key, 3600)
-            if (presignedUrl) {
-              setDisplayUrl(presignedUrl)
+      <div className="relative">
+        <img
+          src={displayUrl || ''}
+          alt="Note attachment"
+          className="w-full max-h-64 object-contain rounded-lg border border-glass-border"
+          style={{ display: loading ? "none" : "block" }}
+          onLoad={() => {
+            setLoading(false)
+            setError(false)
+          }}
+          onError={async () => {
+            // Retry with presigned URL if direct load fails
+            if (displayUrl && !displayUrl.includes('X-Amz-Signature')) {
+              const key = extractS3Key(imageUrlOrKey)
+              const presignedUrl = await getPresignedFileUrl(key, 3600)
+              if (presignedUrl) {
+                setDisplayUrl(presignedUrl)
+              } else {
+                setError(true)
+                setLoading(false)
+              }
             } else {
               setError(true)
               setLoading(false)
             }
-          } else {
-            setError(true)
-            setLoading(false)
-          }
-        }}
-      />
+          }}
+        />
+        {onClick && !loading && !error && (
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center rounded-lg">
+            <ZoomIn className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -239,6 +255,14 @@ export default function Notes() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [selectedImage, setSelectedImage] = useState<{
+    url: string
+    fileName: string
+    fileKey?: string
+  } | null>(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const imageViewerRef = useRef<HTMLDivElement>(null);
 
   const loadNotes = useCallback(() => {
     const statusFilter = filter === 'all' ? undefined : filter;
@@ -735,15 +759,19 @@ export default function Notes() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
-                      className="glass-card rounded-2xl p-6 hover:shadow-card transition-all"
+                      className="glass-card rounded-2xl p-6 hover:shadow-card transition-all cursor-pointer"
                       whileHover={{ scale: 1.01, y: -2 }}
+                      onClick={() => setSelectedNote(note)}
                     >
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center gap-3 flex-wrap">
                           <motion.button
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
-                            onClick={() => handleToggleStatus(note)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleStatus(note);
+                            }}
                             className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
                               note.status === 'done'
                                 ? 'bg-success border-success'
@@ -782,7 +810,10 @@ export default function Notes() {
                           <motion.button
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
-                            onClick={() => handleEdit(note)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEdit(note);
+                            }}
                             className="text-primary hover:text-primary/80"
                           >
                             <Edit className="w-4 h-4" />
@@ -790,7 +821,10 @@ export default function Notes() {
                           <motion.button
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
-                            onClick={() => handleDelete(note.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(note.id);
+                            }}
                             className="text-destructive hover:text-destructive/80"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -804,7 +838,22 @@ export default function Notes() {
                         dangerouslySetInnerHTML={{ __html: formatText(note.text) }}
                       />
                       {note.imageUrl && (
-                        <NoteImage imageUrl={note.imageUrl} />
+                        <NoteImage 
+                          imageUrl={note.imageUrl} 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const key = extractS3Key(note.imageUrl);
+                            getPresignedFileUrl(key, 3600).then((url) => {
+                              if (url) {
+                                setSelectedImage({
+                                  url,
+                                  fileName: key.split('/').pop() || 'image',
+                                  fileKey: key,
+                                });
+                              }
+                            });
+                          }}
+                        />
                       )}
                       {note.status === 'done' && note.completedBy && note.completedAt && (
                         <div className="mb-2 p-2 bg-success/10 rounded-lg border border-success/20">
@@ -1223,6 +1272,250 @@ export default function Notes() {
                 Save Note
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Note Detail Dialog */}
+        <Dialog open={!!selectedNote} onOpenChange={(open) => {
+          if (!open) setSelectedNote(null);
+        }}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            {selectedNote && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Note Details</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  {/* Status and Category */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${
+                      selectedNote.status === 'done'
+                        ? 'bg-success/20 text-success border-success/30'
+                        : 'bg-warning/20 text-warning border-warning/30'
+                    }`}>
+                      {selectedNote.status === 'done' ? 'Done' : 'Pending'}
+                    </span>
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${getCategoryColor(selectedNote.category, selectedNote.subCategory)} flex items-center gap-1`}>
+                      {selectedNote.category === 'reminder' && selectedNote.subCategory && getSubCategoryIcon(selectedNote.subCategory)}
+                      {selectedNote.category === 'reminder' && selectedNote.subCategory 
+                        ? getSubCategoryLabel(selectedNote.subCategory)
+                        : selectedNote.category.charAt(0).toUpperCase() + selectedNote.category.slice(1)}
+                    </span>
+                    {selectedNote.adminOnly && (
+                      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/20 text-primary border border-primary/30">
+                        Admin Only
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Note Text */}
+                  <div 
+                    className="text-foreground whitespace-pre-wrap p-4 bg-secondary/10 rounded-lg border border-glass-border"
+                    dangerouslySetInnerHTML={{ __html: formatText(selectedNote.text) }}
+                  />
+
+                  {/* Note Image */}
+                  {selectedNote.imageUrl && (
+                    <div>
+                      <NoteImage 
+                        imageUrl={selectedNote.imageUrl}
+                        onClick={() => {
+                          const key = extractS3Key(selectedNote.imageUrl);
+                          getPresignedFileUrl(key, 3600).then((url) => {
+                            if (url) {
+                              setSelectedImage({
+                                url,
+                                fileName: key.split('/').pop() || 'image',
+                                fileKey: key,
+                              });
+                            }
+                          });
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Completion Info */}
+                  {selectedNote.status === 'done' && selectedNote.completedBy && selectedNote.completedAt && (
+                    <div className="p-3 bg-success/10 rounded-lg border border-success/20">
+                      <p className="text-sm text-success font-medium">
+                        Completed by {store.getUserById(selectedNote.completedBy)?.name || 'Unknown'} on {new Date(selectedNote.completedAt).toLocaleString()}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Created Info */}
+                  <div className="text-xs text-muted-foreground pt-2 border-t border-glass-border">
+                    <p>Created by: {store.getUserById(selectedNote.createdBy)?.name || 'Unknown'}</p>
+                    <p>Created at: {new Date(selectedNote.createdAt).toLocaleString()}</p>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-4 border-t border-glass-border">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        handleEdit(selectedNote);
+                        setSelectedNote(null);
+                      }}
+                    >
+                      <Edit className="w-4 h-4 mr-2" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        handleToggleStatus(selectedNote);
+                        setSelectedNote(null);
+                      }}
+                    >
+                      <Check className="w-4 h-4 mr-2" />
+                      {selectedNote.status === 'done' ? 'Mark Pending' : 'Mark Done'}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        handleDelete(selectedNote.id);
+                        setSelectedNote(null);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Image Viewer Dialog */}
+        <Dialog
+          open={!!selectedImage}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedImage(null);
+              setImageZoom(1);
+            }
+          }}
+        >
+          <DialogContent className="max-w-7xl max-h-[90vh] p-0 glass-strong overflow-hidden [&>button]:hidden">
+            <DialogHeader className="sr-only">
+              <DialogTitle>{selectedImage?.fileName || 'Image Viewer'}</DialogTitle>
+            </DialogHeader>
+            {selectedImage && (
+              <div
+                className="relative w-full h-[80vh] flex items-center justify-center bg-black/50"
+                ref={imageViewerRef}
+              >
+                <img
+                  src={selectedImage.url}
+                  alt={selectedImage.fileName}
+                  className="max-w-full max-h-full object-contain transition-transform"
+                  style={{ transform: `scale(${imageZoom})` }}
+                  onError={async (e) => {
+                    if (selectedImage.fileKey) {
+                      const presignedUrl = await getPresignedFileUrl(selectedImage.fileKey, 3600);
+                      if (presignedUrl) {
+                        e.currentTarget.src = presignedUrl;
+                        return;
+                      }
+                    }
+                    console.error("Image viewer error:", selectedImage.url);
+                    toast({
+                      title: "Image load failed",
+                      description: "Could not load image",
+                      variant: "destructive",
+                    });
+                  }}
+                />
+
+                {/* Zoom Controls */}
+                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 glass-strong rounded-lg px-4 py-2 border border-glass-border z-10">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => setImageZoom((prev) => Math.max(0.5, prev - 0.25))}
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </Button>
+                  <span className="text-sm font-medium min-w-[60px] text-center">
+                    {Math.round(imageZoom * 100)}%
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => setImageZoom((prev) => Math.min(3, prev + 0.25))}
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setImageZoom(1)}
+                    className="ml-2 h-9"
+                  >
+                    Reset
+                  </Button>
+                </div>
+
+                {/* Top Right Controls */}
+                <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 glass-strong"
+                    onClick={async () => {
+                      if (!selectedImage) return;
+
+                      try {
+                        let downloadUrl = selectedImage.url;
+                        if (selectedImage.fileKey) {
+                          const presignedUrl = await getPresignedFileUrl(selectedImage.fileKey, 3600);
+                          if (presignedUrl) {
+                            downloadUrl = presignedUrl;
+                          }
+                        }
+
+                        const link = document.createElement("a");
+                        link.href = downloadUrl;
+                        link.download = selectedImage.fileName;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+
+                        toast({
+                          title: "Download started",
+                          description: `Downloading ${selectedImage.fileName}`,
+                        });
+                      } catch (error) {
+                        console.error("Download error:", error);
+                        toast({
+                          title: "Download failed",
+                          description: "Could not download image",
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                  >
+                    <Download className="w-5 h-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 glass-strong"
+                    onClick={() => {
+                      setSelectedImage(null);
+                      setImageZoom(1);
+                    }}
+                  >
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 

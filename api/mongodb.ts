@@ -56,6 +56,7 @@ export interface NoteDocument {
   deleted?: boolean;
   deletedAt?: string | null;
   deletedBy?: string | null;
+  imageUrl?: string;
 }
 
 export interface LeaveDocument {
@@ -214,6 +215,7 @@ export interface FormattedNote {
   deleted: boolean;
   deletedAt?: Date;
   deletedBy?: string | null;
+  imageUrl?: string;
 }
 
 export interface FormattedLeave {
@@ -627,6 +629,7 @@ export function formatNote(doc: NoteDocument | WithId<NoteDocument>): FormattedN
     deleted: doc.deleted ?? false,
     deletedAt: doc.deletedAt ? new Date(doc.deletedAt) : undefined,
     deletedBy: doc.deletedBy,
+    imageUrl: doc.imageUrl,
   };
 }
 

@@ -667,14 +667,19 @@ const handleNotes: ApiHandler = async (req, res, context) => {
 
     if (context.method === 'POST') {
       const body = getRequestBody(req);
-      const text = getString(body.text);
+      const text = getString(body.text) || '';
       const createdBy = getString(body.createdBy);
       const category = getString(body.category);
       const subCategory = getString(body.subCategory) as 'refill-stock' | 'remove-from-stock' | 'out-of-stock' | undefined;
       const adminOnly = getBoolean(body.adminOnly) ?? false;
+      const imageUrl = getString(body.imageUrl);
 
-      if (!text || !createdBy) {
-        return json(res, 400, { error: 'text and createdBy are required' });
+      if (!createdBy) {
+        return json(res, 400, { error: 'createdBy is required' });
+      }
+
+      if (!text && !imageUrl) {
+        return json(res, 400, { error: 'text or imageUrl is required' });
       }
 
       const { textCompressed, textLength, textHash } = compressNoteText(text);
@@ -690,6 +695,7 @@ const handleNotes: ApiHandler = async (req, res, context) => {
         category: category || 'general',
         subCategory: category === 'reminder' ? subCategory : undefined,
         adminOnly,
+        imageUrl: imageUrl || undefined,
       };
 
       await notesCollection.insertOne(note);
@@ -726,6 +732,10 @@ const handleNotes: ApiHandler = async (req, res, context) => {
     }
     if (adminOnly !== undefined) {
       update.adminOnly = adminOnly;
+    }
+    const imageUrl = getString(body.imageUrl);
+    if (imageUrl !== undefined) {
+      update.imageUrl = imageUrl || undefined;
     }
 
     if (text !== undefined) {
