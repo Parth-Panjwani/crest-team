@@ -17,6 +17,7 @@ import {
   Notification,
   LateApproval,
   LatePermission,
+  STORE_TIMINGS,
 } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
@@ -1366,6 +1367,74 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   todayAttendance.map(({ employee, attendance }) => {
+                    // Helper function to calculate status based on store timings
+                    const calculatePunchStatus = (
+                      punchTime: Date,
+                      type: "IN" | "OUT"
+                    ): {
+                      status: "on-time" | "late" | "early" | "overtime"
+                      message?: string
+                    } => {
+                      const timeStr = punchTime.toLocaleTimeString("en-US", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      })
+                      const [hours, minutes] = timeStr.split(":").map(Number)
+                      const punchMinutes = hours * 60 + minutes
+
+                      if (type === "IN") {
+                        const [expectedHours, expectedMinutes] =
+                          STORE_TIMINGS.morningStart.split(":").map(Number)
+                        const expectedMinutesTotal =
+                          expectedHours * 60 + expectedMinutes
+
+                        if (punchMinutes < expectedMinutesTotal) {
+                          const diff = expectedMinutesTotal - punchMinutes
+                          return {
+                            status: "early",
+                            message: `${diff} minutes early`,
+                          }
+                        } else if (punchMinutes > expectedMinutesTotal) {
+                          const diff = punchMinutes - expectedMinutesTotal
+                          return {
+                            status: "late",
+                            message: `${diff} minutes late`,
+                          }
+                        }
+                        return { status: "on-time" }
+                      } else if (type === "OUT") {
+                        const [expectedHours, expectedMinutes] =
+                          STORE_TIMINGS.eveningEnd.split(":").map(Number)
+                        const expectedMinutesTotal =
+                          expectedHours * 60 + expectedMinutes
+
+                        if (punchMinutes < expectedMinutesTotal) {
+                          const diff = expectedMinutesTotal - punchMinutes
+                          return {
+                            status: "early",
+                            message: `${diff} minutes early`,
+                          }
+                        } else if (punchMinutes > expectedMinutesTotal) {
+                          const diff = punchMinutes - expectedMinutesTotal
+                          return {
+                            status: "overtime",
+                            message: `${diff} minutes overtime`,
+                          }
+                        }
+                        return { status: "on-time" }
+                      }
+                      return { status: "on-time" }
+                    }
+
+                    // Check if user is on leave
+                    const userLeaves = store.getUserLeaves(employee.id)
+                    const today = new Date().toISOString().split("T")[0]
+                    const isOnLeave = userLeaves.some(
+                      (leave) =>
+                        leave.date === today && leave.status === "approved"
+                    )
+
                     const lastPunch =
                       attendance?.punches[attendance.punches.length - 1]
                     const status = lastPunch
@@ -1389,6 +1458,19 @@ export default function Dashboard() {
                     const checkOut = attendance?.punches.find(
                       (p) => p.type === "OUT"
                     )
+
+                    // Calculate check-in status
+                    const checkInStatus = checkIn
+                      ? checkIn.status ||
+                        calculatePunchStatus(new Date(checkIn.at), "IN").status
+                      : null
+
+                    // Calculate check-out status
+                    const checkOutStatus = checkOut
+                      ? checkOut.status ||
+                        calculatePunchStatus(new Date(checkOut.at), "OUT")
+                          .status
+                      : null
 
                     // Calculate real-time work time if currently checked in
                     let displayWorkTime = attendance?.totals.workMin || 0
@@ -1475,18 +1557,64 @@ export default function Dashboard() {
                               </p>
                             </div>
                           </div>
-                          <div
-                            className={`w-3 h-3 rounded-full ${
-                              isCheckedIn
-                                ? "bg-success shadow-sm shadow-success/50"
-                                : isCheckedOut
-                                ? "bg-muted-foreground"
-                                : "bg-muted-foreground/50"
-                            }`}
-                          >
-                            {isCheckedIn && (
-                              <div className="w-full h-full rounded-full bg-white/50 animate-pulse" />
-                            )}
+                          <div className="flex items-center gap-2">
+                            {/* Status Indicator Dot */}
+                            <div
+                              className={`w-3 h-3 rounded-full ${
+                                isCheckedIn
+                                  ? "bg-success shadow-sm shadow-success/50"
+                                  : isCheckedOut
+                                  ? "bg-muted-foreground"
+                                  : "bg-muted-foreground/50"
+                              }`}
+                            >
+                              {isCheckedIn && (
+                                <div className="w-full h-full rounded-full bg-white/50 animate-pulse" />
+                              )}
+                            </div>
+
+                            {/* Badges */}
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              {/* On Leave Badge */}
+                              {isOnLeave && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-blue-500/20 text-blue-500 border border-blue-500/30 flex items-center gap-1">
+                                  <CalendarIcon className="w-3 h-3" />
+                                  <span>Leave</span>
+                                </span>
+                              )}
+
+                              {/* On Break Badge */}
+                              {isOnBreak && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-warning/20 text-warning border border-warning/30 flex items-center gap-1">
+                                  <Coffee className="w-3 h-3" />
+                                  <span>Break</span>
+                                </span>
+                              )}
+
+                              {/* Late Badge */}
+                              {checkInStatus === "late" && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-destructive/20 text-destructive border border-destructive/30 flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>Late</span>
+                                </span>
+                              )}
+
+                              {/* Early Badge */}
+                              {checkInStatus === "early" && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-warning/20 text-warning border border-warning/30 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Early</span>
+                                </span>
+                              )}
+
+                              {/* Early Checkout Badge */}
+                              {checkOutStatus === "early" && (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-orange-500/20 text-orange-500 border border-orange-500/30 flex items-center gap-1">
+                                  <XCircle className="w-3 h-3" />
+                                  <span>Early Out</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -1497,33 +1625,42 @@ export default function Dashboard() {
                               <span className="text-xs font-medium text-muted-foreground">
                                 Check In
                               </span>
-                              {checkIn.status === "late" && (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30 font-semibold">
-                                  {(() => {
-                                    const punchTime = new Date(checkIn.at)
-                                    const storeOpen = new Date(punchTime)
-                                    storeOpen.setHours(9, 30, 0, 0)
-                                    const diffMs =
-                                      punchTime.getTime() - storeOpen.getTime()
-                                    const lateMinutes = Math.max(
-                                      0,
-                                      Math.floor(diffMs / (1000 * 60))
-                                    )
-                                    return (
-                                      formatMinutesToHours(lateMinutes) +
-                                      " late"
-                                    )
-                                  })()}
-                                </span>
-                              )}
-                              {checkIn.status === "on-time" && (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success border border-success/30">
-                                  On Time
+                              {checkInStatus && (
+                                <span
+                                  className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                                    checkInStatus === "late"
+                                      ? "bg-destructive/20 text-destructive border border-destructive/30"
+                                      : checkInStatus === "early"
+                                      ? "bg-warning/20 text-warning border border-warning/30"
+                                      : "bg-success/20 text-success border border-success/30"
+                                  }`}
+                                >
+                                  {checkInStatus === "late"
+                                    ? (() => {
+                                        const statusInfo = calculatePunchStatus(
+                                          new Date(checkIn.at),
+                                          "IN"
+                                        )
+                                        return statusInfo.message || "Late"
+                                      })()
+                                    : checkInStatus === "early"
+                                    ? (() => {
+                                        const statusInfo = calculatePunchStatus(
+                                          new Date(checkIn.at),
+                                          "IN"
+                                        )
+                                        return statusInfo.message || "Early"
+                                      })()
+                                    : "On Time"}
                                 </span>
                               )}
                             </div>
                             <p className="text-sm font-bold">
-                              {formatTime(checkIn.at)}
+                              {formatTime(
+                                typeof checkIn.at === "string"
+                                  ? checkIn.at
+                                  : checkIn.at.toString()
+                              )}
                             </p>
                           </div>
                         ) : (
@@ -1579,7 +1716,11 @@ export default function Dashboard() {
                               )}
                             </div>
                             <p className="text-sm font-bold">
-                              {formatTime(checkOut.at)}
+                              {formatTime(
+                                typeof checkOut.at === "string"
+                                  ? checkOut.at
+                                  : checkOut.at.toString()
+                              )}
                             </p>
                           </div>
                         )}

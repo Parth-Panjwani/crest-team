@@ -117,7 +117,59 @@ export default function Attendance() {
     setPendingBreakType(null);
   };
 
+  // Helper function to calculate status based on store timings
+  const calculatePunchStatus = (punchTime: Date, type: 'IN' | 'OUT'): { status: 'on-time' | 'late' | 'early' | 'overtime', message?: string } => {
+    const timeStr = punchTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const punchMinutes = hours * 60 + minutes;
+
+    if (type === 'IN') {
+      const [expectedHours, expectedMinutes] = STORE_TIMINGS.morningStart.split(':').map(Number);
+      const expectedMinutesTotal = expectedHours * 60 + expectedMinutes;
+      
+      if (punchMinutes < expectedMinutesTotal) {
+        const diff = expectedMinutesTotal - punchMinutes;
+        return { 
+          status: 'early', 
+          message: `${diff} minutes early` 
+        };
+      } else if (punchMinutes > expectedMinutesTotal) {
+        const diff = punchMinutes - expectedMinutesTotal;
+        return { 
+          status: 'late', 
+          message: `${diff} minutes late` 
+        };
+      }
+      return { status: 'on-time' };
+    } else if (type === 'OUT') {
+      const [expectedHours, expectedMinutes] = STORE_TIMINGS.eveningEnd.split(':').map(Number);
+      const expectedMinutesTotal = expectedHours * 60 + expectedMinutes;
+      
+      if (punchMinutes < expectedMinutesTotal) {
+        const diff = expectedMinutesTotal - punchMinutes;
+        return { 
+          status: 'early', 
+          message: `${diff} minutes early` 
+        };
+      } else if (punchMinutes > expectedMinutesTotal) {
+        const diff = punchMinutes - expectedMinutesTotal;
+        return { 
+          status: 'overtime', 
+          message: `${diff} minutes overtime` 
+        };
+      }
+      return { status: 'on-time' };
+    }
+    return { status: 'on-time' };
+  };
+
   const AttendanceCard = ({ att, employee }: { att: AttendanceType; employee?: User }) => {
+    // Check if user is on leave for this date
+    const userLeaves = employee ? store.getUserLeaves(employee.id) : [];
+    const isOnLeave = userLeaves.some(leave => 
+      leave.date === att.date && leave.status === 'approved'
+    );
+
     // Process check-in/check-out pairs
     const checkInOutPairs: Array<{
       checkIn: Punch;
@@ -183,7 +235,9 @@ export default function Attendance() {
       }
     }
     
+    // Check if currently on break and if complete
     const lastPunch = att.punches[att.punches.length - 1];
+    const isOnBreak = lastPunch?.type === 'BREAK_START';
     const isComplete = lastPunch?.type === 'OUT';
 
     return (
@@ -214,89 +268,272 @@ export default function Attendance() {
               </div>
             </div>
           </div>
-          <div className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ${
-            isComplete ? 'bg-muted/20 text-muted-foreground' : 'bg-success/20 text-success'
-          }`}>
-            {isComplete ? (
-              <>
-                <CheckCircle2 className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span>Complete</span>
-              </>
-            ) : (
-              <>
-                <Timer className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span>In Progress</span>
-              </>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Status Badge */}
+            <div className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ${
+              isComplete ? 'bg-muted/20 text-muted-foreground' : 'bg-success/20 text-success'
+            }`}>
+              {isComplete ? (
+                <>
+                  <CheckCircle2 className="w-3 h-3 sm:w-4 sm:h-4" />
+                  <span>Complete</span>
+                </>
+              ) : (
+                <>
+                  <Timer className="w-3 h-3 sm:w-4 sm:h-4" />
+                  <span>In Progress</span>
+                </>
+              )}
+            </div>
+
+            {/* On Leave Badge */}
+            {isOnLeave && (
+              <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold bg-blue-500/20 text-blue-500 border border-blue-500/30 flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                <span>On Leave</span>
+              </span>
             )}
+
+            {/* On Break Badge */}
+            {isOnBreak && (
+              <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold bg-warning/20 text-warning border border-warning/30 flex items-center gap-1">
+                <Coffee className="w-3 h-3" />
+                <span>On Break</span>
+              </span>
+            )}
+
+            {/* Late/Early Badges for Check-In */}
+            {checkInOutPairs.length > 0 && checkInOutPairs[0].checkIn && (() => {
+              const checkIn = checkInOutPairs[0].checkIn;
+              const status = checkIn.status || calculatePunchStatus(new Date(checkIn.at), 'IN').status;
+              
+              if (status === 'late') {
+                return (
+                  <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold bg-destructive/20 text-destructive border border-destructive/30 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    <span>Late</span>
+                  </span>
+                );
+              } else if (status === 'early') {
+                return (
+                  <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold bg-warning/20 text-warning border border-warning/30 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>Early</span>
+                  </span>
+                );
+              }
+              return null;
+            })()}
+
+            {/* Early Checkout Badge */}
+            {checkInOutPairs.length > 0 && checkInOutPairs[checkInOutPairs.length - 1].checkOut && (() => {
+              const checkOut = checkInOutPairs[checkInOutPairs.length - 1].checkOut!;
+              const status = checkOut.status || calculatePunchStatus(new Date(checkOut.at), 'OUT').status;
+              
+              if (status === 'early') {
+                return (
+                  <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold bg-orange-500/20 text-orange-500 border border-orange-500/30 flex items-center gap-1">
+                    <XCircle className="w-3 h-3" />
+                    <span>Early Checkout</span>
+                  </span>
+                );
+              }
+              return null;
+            })()}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:gap-4 mb-4 sm:mb-6">
-          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
-            <div className="flex items-center gap-2 sm:gap-3 mb-2">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+        {/* Detailed Insights Summary */}
+        {(() => {
+          const firstCheckIn = checkInOutPairs.length > 0 ? checkInOutPairs[0].checkIn : null;
+          const lastCheckOut = checkInOutPairs.length > 0 && checkInOutPairs[checkInOutPairs.length - 1].checkOut 
+            ? checkInOutPairs[checkInOutPairs.length - 1].checkOut 
+            : null;
+          
+          const checkInStatusInfo = firstCheckIn 
+            ? calculatePunchStatus(new Date(firstCheckIn.at), 'IN')
+            : null;
+          const checkOutStatusInfo = lastCheckOut
+            ? calculatePunchStatus(new Date(lastCheckOut.at), 'OUT')
+            : null;
+
+          const lateCount = checkInOutPairs.filter(pair => {
+            const status = pair.checkIn.status || calculatePunchStatus(new Date(pair.checkIn.at), 'IN').status;
+            return status === 'late';
+          }).length;
+          
+          const earlyCheckoutCount = checkInOutPairs.filter(pair => {
+            if (!pair.checkOut) return false;
+            const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+            return status === 'early';
+          }).length;
+
+          return (
+            <div className="mb-4 sm:mb-6 space-y-2 sm:space-y-3">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                {/* Work Time */}
+                <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Work Time</p>
+                      <p className="text-base sm:text-lg md:text-xl font-bold">
+                        {(() => {
+                          // Calculate real-time work time if currently checked in
+                          const checkIn = att.punches.find(p => p.type === 'IN');
+                          const lastPunch = att.punches[att.punches.length - 1];
+                          const isCheckedIn = lastPunch && (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END');
+                          
+                          if (isCheckedIn && checkIn) {
+                            let workMs = 0;
+                            let lastIn: Date | null = null;
+                            let lastBreakStart: Date | null = null;
+                            const now = new Date().getTime();
+                            
+                            for (const punch of att.punches) {
+                              const punchTime = new Date(punch.at).getTime();
+                              if (punch.type === 'IN') {
+                                lastIn = new Date(punch.at);
+                              } else if (punch.type === 'OUT' && lastIn) {
+                                workMs += punchTime - lastIn.getTime();
+                                lastIn = null;
+                              } else if (punch.type === 'BREAK_START' && lastIn) {
+                                workMs += punchTime - lastIn.getTime();
+                                lastBreakStart = new Date(punch.at);
+                                lastIn = null;
+                              } else if (punch.type === 'BREAK_END' && lastBreakStart) {
+                                lastIn = new Date(punch.at);
+                                lastBreakStart = null;
+                              }
+                            }
+                            
+                            if (lastIn) {
+                              workMs += now - lastIn.getTime();
+                            }
+                            
+                            const workMin = Math.round(workMs / 60000);
+                            return `${Math.floor(workMin / 60)}h ${workMin % 60}m`;
+                          }
+                          
+                          return `${Math.floor(att.totals.workMin / 60)}h ${att.totals.workMin % 60}m`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Break Time */}
+                <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
+                      <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-warning" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Break Time</p>
+                      <p className="text-base sm:text-lg md:text-xl font-bold">
+                        {Math.floor(att.totals.breakMin / 60)}h {att.totals.breakMin % 60}m
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Late Count */}
+                {lateCount > 0 && (
+                  <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-destructive/30 bg-destructive/5">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-destructive/20 flex items-center justify-center flex-shrink-0">
+                        <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-destructive" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Late Arrivals</p>
+                        <p className="text-base sm:text-lg md:text-xl font-bold text-destructive">
+                          {lateCount}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Early Checkout Count */}
+                {earlyCheckoutCount > 0 && (
+                  <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-orange-500/30 bg-orange-500/5">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                        <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Early Checkouts</p>
+                        <p className="text-base sm:text-lg md:text-xl font-bold text-orange-500">
+                          {earlyCheckoutCount}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Work Time</p>
-                <p className="text-base sm:text-lg md:text-xl font-bold">
-                  {(() => {
-                    // Calculate real-time work time if currently checked in
-                    const checkIn = att.punches.find(p => p.type === 'IN');
-                    const lastPunch = att.punches[att.punches.length - 1];
-                    const isCheckedIn = lastPunch && (lastPunch.type === 'IN' || lastPunch.type === 'BREAK_END');
-                    
-                    if (isCheckedIn && checkIn) {
-                      let workMs = 0;
-                      let lastIn: Date | null = null;
-                      let lastBreakStart: Date | null = null;
-                      const now = new Date().getTime();
-                      
-                      for (const punch of att.punches) {
-                        const punchTime = new Date(punch.at).getTime();
-                        if (punch.type === 'IN') {
-                          lastIn = new Date(punch.at);
-                        } else if (punch.type === 'OUT' && lastIn) {
-                          workMs += punchTime - lastIn.getTime();
-                          lastIn = null;
-                        } else if (punch.type === 'BREAK_START' && lastIn) {
-                          workMs += punchTime - lastIn.getTime();
-                          lastBreakStart = new Date(punch.at);
-                          lastIn = null;
-                        } else if (punch.type === 'BREAK_END' && lastBreakStart) {
-                          lastIn = new Date(punch.at);
-                          lastBreakStart = null;
-                        }
-                      }
-                      
-                      if (lastIn) {
-                        workMs += now - lastIn.getTime();
-                      }
-                      
-                      const workMin = Math.round(workMs / 60000);
-                      return `${Math.floor(workMin / 60)}h ${workMin % 60}m`;
-                    }
-                    
-                    return `${Math.floor(att.totals.workMin / 60)}h ${att.totals.workMin % 60}m`;
-                  })()}
-                </p>
-              </div>
+
+              {/* Detailed Status Information */}
+              {(checkInStatusInfo || checkOutStatusInfo) && (
+                <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
+                  <p className="text-xs sm:text-sm font-semibold mb-2 sm:mb-3">Timing Details</p>
+                  <div className="space-y-2">
+                    {firstCheckIn && checkInStatusInfo && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground">Expected Check-In:</span>
+                        <span className="text-[10px] sm:text-xs font-medium">{STORE_TIMINGS.morningStart}</span>
+                      </div>
+                    )}
+                    {firstCheckIn && checkInStatusInfo && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground">Actual Check-In:</span>
+                        <span className="text-[10px] sm:text-xs font-medium">{formatTime(firstCheckIn.at)}</span>
+                      </div>
+                    )}
+                    {firstCheckIn && checkInStatusInfo && checkInStatusInfo.status !== 'on-time' && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground">Status:</span>
+                        <span className={`text-[10px] sm:text-xs font-semibold ${
+                          checkInStatusInfo.status === 'late' ? 'text-destructive' :
+                          checkInStatusInfo.status === 'early' ? 'text-warning' :
+                          'text-success'
+                        }`}>
+                          {checkInStatusInfo.message || checkInStatusInfo.status}
+                        </span>
+                      </div>
+                    )}
+                    {lastCheckOut && checkOutStatusInfo && (
+                      <div className="flex items-center justify-between pt-2 border-t border-glass-border">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground">Expected Check-Out:</span>
+                        <span className="text-[10px] sm:text-xs font-medium">{STORE_TIMINGS.eveningEnd}</span>
+                      </div>
+                    )}
+                    {lastCheckOut && checkOutStatusInfo && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground">Actual Check-Out:</span>
+                        <span className="text-[10px] sm:text-xs font-medium">{formatTime(lastCheckOut.at)}</span>
+                      </div>
+                    )}
+                    {lastCheckOut && checkOutStatusInfo && checkOutStatusInfo.status !== 'on-time' && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground">Status:</span>
+                        <span className={`text-[10px] sm:text-xs font-semibold ${
+                          checkOutStatusInfo.status === 'early' ? 'text-orange-500' :
+                          checkOutStatusInfo.status === 'overtime' ? 'text-primary' :
+                          'text-success'
+                        }`}>
+                          {checkOutStatusInfo.message || checkOutStatusInfo.status}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-          <div className="glass-card rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-glass-border">
-            <div className="flex items-center gap-2 sm:gap-3 mb-2">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
-                <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-warning" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">Break Time</p>
-                <p className="text-base sm:text-lg md:text-xl font-bold">
-                  {Math.floor(att.totals.breakMin / 60)}h {att.totals.breakMin % 60}m
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
 
         <div className="space-y-3 pt-3 sm:pt-4 border-t border-glass-border">
           {checkInOutPairs.length > 0 && (
@@ -347,19 +584,28 @@ export default function Attendance() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-xs font-medium">Check In</p>
-                          {pair.checkIn.status && (
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                              pair.checkIn.status === 'late' ? 'bg-destructive/20 text-destructive border border-destructive/30' :
-                              pair.checkIn.status === 'early' ? 'bg-warning/20 text-warning border border-warning/30' :
-                              'bg-success/20 text-success border border-success/30'
-                            }`}>
-                              {pair.checkIn.status === 'late' ? 'Late' : pair.checkIn.status === 'early' ? 'Early' : 'On Time'}
-                            </span>
-                          )}
+                          {(() => {
+                            const status = pair.checkIn.status || calculatePunchStatus(new Date(pair.checkIn.at), 'IN').status;
+                            return (
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                status === 'late' ? 'bg-destructive/20 text-destructive border border-destructive/30' :
+                                status === 'early' ? 'bg-warning/20 text-warning border border-warning/30' :
+                                'bg-success/20 text-success border border-success/30'
+                              }`}>
+                                {status === 'late' ? 'Late' : status === 'early' ? 'Early' : 'On Time'}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <p className="text-[10px] text-muted-foreground">
                           {formatTime(pair.checkIn.at)}
-                          {pair.checkIn.statusMessage && ` - ${pair.checkIn.statusMessage}`}
+                          {(() => {
+                            const statusInfo = calculatePunchStatus(new Date(pair.checkIn.at), 'IN');
+                            if (statusInfo.status !== 'on-time' && statusInfo.message) {
+                              return ` - ${statusInfo.message}`;
+                            }
+                            return pair.checkIn.statusMessage ? ` - ${pair.checkIn.statusMessage}` : '';
+                          })()}
                         </p>
                         {pair.checkIn.lateApprovalId && !pair.checkIn.lateApprovalStatus && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30 mt-1 inline-block">
@@ -381,34 +627,49 @@ export default function Attendance() {
                     {pair.checkOut ? (
                       <div className="flex items-center gap-2">
                         <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                          pair.checkOut.status === 'overtime' ? 'bg-primary/20' :
-                          pair.checkOut.status === 'early' ? 'bg-warning/20' :
-                          'bg-muted/20'
+                          (() => {
+                            const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+                            return status === 'overtime' ? 'bg-primary/20' :
+                              status === 'early' ? 'bg-orange-500/20' :
+                              'bg-success/20';
+                          })()
                         }`}>
-                          {pair.checkOut.status === 'overtime' ? (
-                            <Clock className="w-3 h-3 text-primary" />
-                          ) : pair.checkOut.status === 'early' ? (
-                            <AlertTriangle className="w-3 h-3 text-warning" />
-                          ) : (
-                            <XCircle className="w-3 h-3 text-muted-foreground" />
-                          )}
+                          {(() => {
+                            const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+                            return status === 'overtime' ? (
+                              <Clock className="w-3 h-3 text-primary" />
+                            ) : status === 'early' ? (
+                              <XCircle className="w-3 h-3 text-orange-500" />
+                            ) : (
+                              <CheckCircle2 className="w-3 h-3 text-success" />
+                            );
+                          })()}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-xs font-medium">Check Out</p>
-                            {pair.checkOut.status && (
-                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                                pair.checkOut.status === 'overtime' ? 'bg-primary/20 text-primary border border-primary/30' :
-                                pair.checkOut.status === 'early' ? 'bg-warning/20 text-warning border border-warning/30' :
-                                'bg-success/20 text-success border border-success/30'
-                              }`}>
-                                {pair.checkOut.status === 'overtime' ? 'Overtime' : pair.checkOut.status === 'early' ? 'Early' : 'On Time'}
-                              </span>
-                            )}
+                            {(() => {
+                              const status = pair.checkOut.status || calculatePunchStatus(new Date(pair.checkOut.at), 'OUT').status;
+                              return (
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                  status === 'overtime' ? 'bg-primary/20 text-primary border border-primary/30' :
+                                  status === 'early' ? 'bg-orange-500/20 text-orange-500 border border-orange-500/30' :
+                                  'bg-success/20 text-success border border-success/30'
+                                }`}>
+                                  {status === 'overtime' ? 'Overtime' : status === 'early' ? 'Early Checkout' : 'On Time'}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <p className="text-[10px] text-muted-foreground">
                             {formatTime(pair.checkOut.at)}
-                            {pair.checkOut.statusMessage && ` - ${pair.checkOut.statusMessage}`}
+                            {(() => {
+                              const statusInfo = calculatePunchStatus(new Date(pair.checkOut.at), 'OUT');
+                              if (statusInfo.status !== 'on-time' && statusInfo.message) {
+                                return ` - ${statusInfo.message}`;
+                              }
+                              return pair.checkOut.statusMessage ? ` - ${pair.checkOut.statusMessage}` : '';
+                            })()}
                           </p>
                           {pair.checkOut.reason && (
                             <p className="text-[10px] text-muted-foreground italic mt-0.5">Reason: {pair.checkOut.reason}</p>
