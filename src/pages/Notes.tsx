@@ -82,41 +82,72 @@ function extractS3Key(imageUrl: string): string {
 
 // Component to display note image with presigned URL
 function NoteImage({ imageUrl: imageUrlOrKey }: { imageUrl: string }) {
-  const [displayUrl, setDisplayUrl] = useState<string>(imageUrlOrKey)
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
   useEffect(() => {
     const loadImage = async () => {
-      // Try direct URL first (for backward compatibility)
-      const img = new Image()
-      img.onload = () => {
-        setLoading(false)
-        setError(false)
-      }
-      img.onerror = async () => {
-        // If direct URL fails, try to get presigned URL
-        const key = extractS3Key(imageUrlOrKey)
-        const presignedUrl = await getPresignedFileUrl(key, 3600)
+      setLoading(true)
+      setError(false)
+      
+      // Check if it's an S3 key (starts with "uploads/")
+      const isS3Key = imageUrlOrKey.startsWith('uploads/')
+      
+      if (isS3Key) {
+        // For S3 keys, always get presigned URL (required for mobile/CORS)
+        const presignedUrl = await getPresignedFileUrl(imageUrlOrKey, 3600)
         if (presignedUrl) {
-          setDisplayUrl(presignedUrl)
           // Verify presigned URL works
-          const presignedImg = new Image()
-          presignedImg.onload = () => {
+          const img = new Image()
+          img.onload = () => {
+            setDisplayUrl(presignedUrl)
             setLoading(false)
             setError(false)
           }
-          presignedImg.onerror = () => {
+          img.onerror = () => {
+            console.error('Failed to load presigned URL for key:', imageUrlOrKey)
             setError(true)
             setLoading(false)
           }
-          presignedImg.src = presignedUrl
+          img.src = presignedUrl
         } else {
+          console.error('Failed to get presigned URL for key:', imageUrlOrKey)
           setError(true)
           setLoading(false)
         }
+      } else {
+        // For direct URLs, try direct first, then presigned if it fails
+        const img = new Image()
+        img.onload = () => {
+          setDisplayUrl(imageUrlOrKey)
+          setLoading(false)
+          setError(false)
+        }
+        img.onerror = async () => {
+          // If direct URL fails, try to get presigned URL
+          const key = extractS3Key(imageUrlOrKey)
+          const presignedUrl = await getPresignedFileUrl(key, 3600)
+          if (presignedUrl) {
+            const presignedImg = new Image()
+            presignedImg.onload = () => {
+              setDisplayUrl(presignedUrl)
+              setLoading(false)
+              setError(false)
+            }
+            presignedImg.onerror = () => {
+              console.error('Failed to load presigned URL:', presignedUrl)
+              setError(true)
+              setLoading(false)
+            }
+            presignedImg.src = presignedUrl
+          } else {
+            setError(true)
+            setLoading(false)
+          }
+        }
+        img.src = imageUrlOrKey
       }
-      img.src = imageUrlOrKey
     }
 
     loadImage()
@@ -133,10 +164,22 @@ function NoteImage({ imageUrl: imageUrlOrKey }: { imageUrl: string }) {
     )
   }
 
+  if (!displayUrl && loading) {
+    return (
+      <div className="w-full max-h-64 flex items-center justify-center bg-secondary/20 border border-glass-border rounded-lg p-4">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!displayUrl) {
+    return null
+  }
+
   return (
     <div className="mb-2 relative">
       {loading && (
-        <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center rounded-lg">
+        <div className="absolute inset-0 bg-secondary/20 flex items-center justify-center rounded-lg z-10">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       )}
@@ -145,8 +188,26 @@ function NoteImage({ imageUrl: imageUrlOrKey }: { imageUrl: string }) {
         alt="Note attachment"
         className="w-full max-h-64 object-contain rounded-lg border border-glass-border"
         style={{ display: loading ? "none" : "block" }}
-        onLoad={() => setLoading(false)}
-        onError={() => setError(true)}
+        onLoad={() => {
+          setLoading(false)
+          setError(false)
+        }}
+        onError={async () => {
+          // Retry with presigned URL if direct load fails
+          if (displayUrl && !displayUrl.includes('X-Amz-Signature')) {
+            const key = extractS3Key(imageUrlOrKey)
+            const presignedUrl = await getPresignedFileUrl(key, 3600)
+            if (presignedUrl) {
+              setDisplayUrl(presignedUrl)
+            } else {
+              setError(true)
+              setLoading(false)
+            }
+          } else {
+            setError(true)
+            setLoading(false)
+          }
+        }}
       />
     </div>
   )
