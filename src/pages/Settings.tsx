@@ -19,7 +19,8 @@ import {
 import { 
   initializeFirebaseClient, 
   requestNotificationPermission, 
-  getFCMToken 
+  getFCMToken,
+  getNotificationPermission
 } from "@/lib/firebase"
 import { useState, useEffect, useCallback } from "react"
 
@@ -56,15 +57,14 @@ export default function Settings() {
   // Initialize notification status
   useEffect(() => {
     // Check current notification permission status
-    if ('Notification' in window) {
-      setNotificationPermission(Notification.permission)
-    }
+    setNotificationPermission(getNotificationPermission());
     
     // Check if FCM token is saved
     if (user?.id) {
       checkFCMTokenStatus().then((hasToken) => {
         // Auto-enable notifications if permission is granted but token is missing
-        if ('Notification' in window && Notification.permission === 'granted' && !hasToken) {
+        const permission = getNotificationPermission();
+        if (permission === 'granted' && !hasToken) {
           // Permission granted but no token, try to get one automatically
           const autoEnable = async () => {
             try {
@@ -105,11 +105,18 @@ export default function Settings() {
       const app = initializeFirebaseClient()
       if (!app) {
         console.error('❌ Firebase initialization failed')
+        
+        // Check if we're on mobile
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const errorMessage = isMobile
+          ? "Firebase configuration not loaded. This is usually a cache issue. Please clear your browser cache or do a hard refresh (hold the refresh button). If the issue persists, contact administrator."
+          : "Firebase environment variables are not set. Push notifications are disabled. Please contact administrator to configure Firebase.";
+        
         toast({
           title: "Configuration Error",
-          description: "Firebase environment variables are not set. Push notifications are disabled. Please contact administrator to configure Firebase.",
+          description: errorMessage,
           variant: "destructive",
-          duration: 6000,
+          duration: 8000,
         })
         setIsEnabling(false)
         return
@@ -121,7 +128,7 @@ export default function Settings() {
       const hasPermission = await requestNotificationPermission()
       if (!hasPermission) {
         console.warn('⚠️ Permission denied or not granted')
-        const currentPermission = Notification.permission
+        const currentPermission = getNotificationPermission()
         setNotificationPermission(currentPermission)
         
         if (currentPermission === 'denied') {

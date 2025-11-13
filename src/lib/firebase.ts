@@ -5,6 +5,23 @@ let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
 
 /**
+ * Safely check if Notification API is available
+ */
+function isNotificationSupported(): boolean {
+  return typeof window !== 'undefined' && 'Notification' in window && typeof window.Notification !== 'undefined';
+}
+
+/**
+ * Safely get Notification API
+ */
+function getNotificationAPI(): typeof Notification | null {
+  if (!isNotificationSupported()) {
+    return null;
+  }
+  return window.Notification;
+}
+
+/**
  * Initialize Firebase client SDK
  */
 export function initializeFirebaseClient(): FirebaseApp | null {
@@ -15,13 +32,29 @@ export function initializeFirebaseClient(): FirebaseApp | null {
   // Safely get environment variables with fallback to empty string
   const getEnvVar = (key: string): string | undefined => {
     try {
+      // Direct access - Vite replaces these at build time
       const value = import.meta.env[key];
-      return value && typeof value === 'string' && value.trim() !== '' ? value : undefined;
+      const hasValue = value && typeof value === 'string' && value.trim() !== '';
+      
+      // Debug logging (only in production to help diagnose mobile issues)
+      if (!hasValue && typeof window !== 'undefined') {
+        console.debug(`[Firebase] ${key}:`, value === undefined ? 'undefined' : value === '' ? 'empty string' : typeof value);
+      }
+      
+      return hasValue ? value : undefined;
     } catch (error) {
       // Environment variable not available (e.g., in production build without env vars)
+      console.error(`[Firebase] Error accessing ${key}:`, error);
       return undefined;
     }
   };
+
+  // Debug: Log all VITE_ env vars (for troubleshooting)
+  if (typeof window !== 'undefined' && import.meta.env.DEV === false) {
+    const allViteVars = Object.keys(import.meta.env).filter(k => k.startsWith('VITE_'));
+    console.debug('[Firebase] Available VITE_ variables:', allViteVars);
+    console.debug('[Firebase] import.meta.env keys:', Object.keys(import.meta.env));
+  }
 
   const firebaseConfig = {
     apiKey: getEnvVar('VITE_FIREBASE_API_KEY'),
@@ -41,8 +74,12 @@ export function initializeFirebaseClient(): FirebaseApp | null {
 
   if (missingVars.length > 0) {
     // Always log in production so users know what's missing
-    console.warn('⚠️  Firebase config not complete. Missing environment variables:', missingVars.join(', '));
-    console.warn('💡 Add these variables to Vercel: Settings → Environment Variables');
+    console.error('❌ Firebase config not complete. Missing environment variables:', missingVars.join(', '));
+    console.error('💡 This usually means:');
+    console.error('   1. Variables not set in Vercel (Settings → Environment Variables)');
+    console.error('   2. Build was done before variables were added (need to redeploy)');
+    console.error('   3. Mobile browser is using cached build (clear cache/hard refresh)');
+    console.error('   📱 Mobile fix: Clear browser cache or do a hard refresh (hold refresh button)');
     return null;
   }
 
@@ -96,22 +133,39 @@ export function getFirebaseMessaging(): Messaging | null {
  * Request notification permission
  */
 export async function requestNotificationPermission(): Promise<boolean> {
-  if (!('Notification' in window)) {
-    console.warn('This browser does not support notifications');
+  const NotificationAPI = getNotificationAPI();
+  if (!NotificationAPI) {
+    console.warn('⚠️  Notification API is not available in this browser/context');
     return false;
   }
 
-  if (Notification.permission === 'granted') {
+  if (NotificationAPI.permission === 'granted') {
     return true;
   }
 
-  if (Notification.permission === 'denied') {
-    console.warn('Notification permission denied');
+  if (NotificationAPI.permission === 'denied') {
+    console.warn('⚠️  Notification permission denied');
     return false;
   }
 
-  const permission = await Notification.requestPermission();
-  return permission === 'granted';
+  try {
+    const permission = await NotificationAPI.requestPermission();
+    return permission === 'granted';
+  } catch (error) {
+    console.error('❌ Error requesting notification permission:', error);
+    return false;
+  }
+}
+
+/**
+ * Get current notification permission status
+ */
+export function getNotificationPermission(): 'default' | 'granted' | 'denied' {
+  const NotificationAPI = getNotificationAPI();
+  if (!NotificationAPI) {
+    return 'default';
+  }
+  return NotificationAPI.permission;
 }
 
 /**

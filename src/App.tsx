@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { store } from "./lib/store";
 import { useWebSocket } from "./hooks/useWebSocket";
 import FullScreenLoader from "./components/FullScreenLoader";
-import { initializeFirebaseClient, requestNotificationPermission, getFCMToken, onForegroundMessage } from "./lib/firebase";
+import { initializeFirebaseClient, requestNotificationPermission, getFCMToken, onForegroundMessage, getNotificationPermission } from "./lib/firebase";
 
 const Login = lazy(() => import("./pages/Login"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -86,13 +86,15 @@ const AppInitializer = () => {
         }
 
         // Check if permission is already granted
-        if ('Notification' in window && Notification.permission === 'granted') {
+        const permission = getNotificationPermission();
+        
+        if (permission === 'granted') {
           // Permission already granted, get and save token
           const token = await getFCMToken();
           if (token && user?.id) {
             await saveFCMToken(user.id, token);
           }
-        } else if ('Notification' in window && Notification.permission === 'default') {
+        } else if (permission === 'default') {
           // Permission not yet requested, request it automatically
           const hasPermission = await requestNotificationPermission();
           if (hasPermission) {
@@ -108,16 +110,20 @@ const AppInitializer = () => {
         onForegroundMessage((payload) => {
           console.log('📬 Foreground message received:', payload);
           // Show browser notification
-          if ('Notification' in window && Notification.permission === 'granted') {
-            const notification = new Notification(payload.notification?.title || 'New Notification', {
-              body: payload.notification?.body || '',
-              icon: '/logo.png',
-              badge: '/logo.png',
-            });
-            notification.onclick = () => {
-              window.focus();
-              notification.close();
-            };
+          if (typeof window !== 'undefined' && 'Notification' in window && window.Notification && window.Notification.permission === 'granted') {
+            try {
+              const notification = new window.Notification(payload.notification?.title || 'New Notification', {
+                body: payload.notification?.body || '',
+                icon: '/logo.png',
+                badge: '/logo.png',
+              });
+              notification.onclick = () => {
+                window.focus();
+                notification.close();
+              };
+            } catch (error) {
+              console.error('❌ Failed to create notification:', error);
+            }
           }
           // Refresh data to show new notifications/messages
           store.refreshData().catch(console.error);
