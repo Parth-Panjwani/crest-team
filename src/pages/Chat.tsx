@@ -645,6 +645,29 @@ export default function Chat() {
     if (audioRefs.current.has(messageId)) {
       const existingAudio = audioRefs.current.get(messageId)!
       if (existingAudio.src && !existingAudio.error) {
+        // Wait for audio to be ready if it's not already
+        if (existingAudio.readyState < 2) {
+          await new Promise<void>((resolve, reject) => {
+            const onCanPlay = () => {
+              existingAudio.removeEventListener("canplay", onCanPlay)
+              existingAudio.removeEventListener("error", onError)
+              resolve()
+            }
+            const onError = () => {
+              existingAudio.removeEventListener("canplay", onCanPlay)
+              existingAudio.removeEventListener("error", onError)
+              reject(new Error("Failed to load audio"))
+            }
+            existingAudio.addEventListener("canplay", onCanPlay)
+            existingAudio.addEventListener("error", onError)
+            // Timeout after 10 seconds
+            setTimeout(() => {
+              existingAudio.removeEventListener("canplay", onCanPlay)
+              existingAudio.removeEventListener("error", onError)
+              reject(new Error("Audio loading timeout"))
+            }, 10000)
+          })
+        }
         return existingAudio
       }
     }
@@ -667,17 +690,47 @@ export default function Chat() {
     }
 
     const audio = new Audio()
-    audio.addEventListener("error", () => {
-      toast({
-        title: "Playback failed",
-        description: "Could not play voice note",
-        variant: "destructive",
-      })
-      setPlayingAudioId(null)
+    
+    // Wait for audio to be ready before returning
+    await new Promise<void>((resolve, reject) => {
+      let timeout: NodeJS.Timeout | null = null
+      
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout)
+          timeout = null
+        }
+        audio.removeEventListener("canplay", onCanPlay)
+        audio.removeEventListener("error", onError)
+      }
+      
+      const onCanPlay = () => {
+        cleanup()
+        resolve()
+      }
+      const onError = (e: Event) => {
+        cleanup()
+        const errorMsg = audio.error 
+          ? `Error ${audio.error.code}: ${audio.error.message || "Unknown error"}`
+          : "Failed to load audio"
+        reject(new Error(errorMsg))
+      }
+      
+      audio.addEventListener("canplay", onCanPlay, { once: true })
+      audio.addEventListener("error", onError, { once: true })
+      
+      // Timeout after 10 seconds
+      timeout = setTimeout(() => {
+        cleanup()
+        reject(new Error("Audio loading timeout"))
+      }, 10000)
+      
+      // Set source after listeners are attached
+      audio.src = audioUrl
+      audio.preload = "auto"
+      audio.load() // Explicitly start loading
     })
 
-    audio.src = audioUrl
-    audio.preload = "auto"
     audioRefs.current.set(messageId, audio)
     return audio
   }
@@ -698,11 +751,48 @@ export default function Chat() {
 
       const audio = await getAudioElement(messageId, fileUrl, fileKey)
 
+      // Ensure audio is ready before playing
+      if (audio.readyState < 2) {
+        await new Promise<void>((resolve, reject) => {
+          const onCanPlay = () => {
+            audio.removeEventListener("canplay", onCanPlay)
+            audio.removeEventListener("error", onError)
+            resolve()
+          }
+          const onError = () => {
+            audio.removeEventListener("canplay", onCanPlay)
+            audio.removeEventListener("error", onError)
+            reject(new Error("Audio not ready"))
+          }
+          audio.addEventListener("canplay", onCanPlay, { once: true })
+          audio.addEventListener("error", onError, { once: true })
+          setTimeout(() => {
+            audio.removeEventListener("canplay", onCanPlay)
+            audio.removeEventListener("error", onError)
+            reject(new Error("Audio loading timeout"))
+          }, 5000)
+        })
+      }
+
       if (audio.paused) {
-        await audio.play()
-        setPlayingAudioId(messageId)
-        audio.onended = () => {
-          setPlayingAudioId(null)
+        try {
+          await audio.play()
+          setPlayingAudioId(messageId)
+          audio.onended = () => {
+            setPlayingAudioId(null)
+          }
+          audio.onerror = () => {
+            setPlayingAudioId(null)
+            toast({
+              title: "Playback failed",
+              description: "Could not play voice note",
+              variant: "destructive",
+            })
+          }
+        } catch (playError) {
+          // Handle play() promise rejection (e.g., user interaction required)
+          console.error("Play error:", playError)
+          throw playError
         }
       } else {
         audio.pause()

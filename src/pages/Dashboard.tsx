@@ -60,9 +60,6 @@ export default function Dashboard() {
   const [pendingBreakType, setPendingBreakType] = useState<
     "BREAK_START" | "BREAK_END" | null
   >(null)
-  const [remoteCheckInDialogOpen, setRemoteCheckInDialogOpen] = useState(false)
-  const [remoteCheckInReason, setRemoteCheckInReason] = useState("")
-  const [remoteCheckInLocation, setRemoteCheckInLocation] = useState("")
   const [checkInSelfieDialogOpen, setCheckInSelfieDialogOpen] = useState(false)
   const [checkOutSelfieDialogOpen, setCheckOutSelfieDialogOpen] = useState(false)
   const [pendingSelfieUrl, setPendingSelfieUrl] = useState<string | null>(null)
@@ -421,26 +418,18 @@ export default function Dashboard() {
     setCheckInSelfieDialogOpen(true)
   }
 
-  const handleCheckIn = async (isRemote: boolean = false, reason?: string, location?: string, selfieUrl?: string) => {
-    console.log('[Dashboard] handleCheckIn called with:', { isRemote, reason, location, selfieUrl });
+  const handleCheckIn = async (selfieUrl?: string) => {
+    console.log('[Dashboard] handleCheckIn called with:', { selfieUrl });
     try {
       await store.punch(user.id, "IN", {
-        remotePunch: isRemote,
-        reason: reason,
-        location: location,
         selfieUrl: selfieUrl,
       })
       // Store will auto-refresh via WebSocket, but refresh immediately for instant feedback
       await store.refreshData()
       toast({ 
         title: "Checked In", 
-        description: isRemote ? "Remote check-in recorded. Safe travels!" : "Have a productive day!" 
+        description: "Have a productive day!" 
       })
-      if (isRemote) {
-        setRemoteCheckInDialogOpen(false)
-        setRemoteCheckInReason("")
-        setRemoteCheckInLocation("")
-      }
       setCheckInSelfieDialogOpen(false)
       setPendingSelfieUrl(null)
     } catch (error) {
@@ -1247,20 +1236,6 @@ export default function Dashboard() {
                       Check In
                     </Button>
                   </motion.div>
-                  <motion.div
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="col-span-2 sm:col-span-1"
-                  >
-                    <Button
-                      onClick={() => setRemoteCheckInDialogOpen(true)}
-                      variant="outline"
-                      className="w-full h-14 text-lg border-2 hover:bg-primary/10"
-                    >
-                      <Clock className="mr-2 w-5 h-5" />
-                      Remote Check In
-                    </Button>
-                  </motion.div>
                 </>
               )}
 
@@ -1519,7 +1494,7 @@ export default function Dashboard() {
             <SelfieCapture
               onCapture={(selfieUrl) => {
                 console.log('[Dashboard] SelfieCapture onCapture called with selfieUrl:', selfieUrl);
-                handleCheckIn(false, undefined, undefined, selfieUrl)
+                handleCheckIn(selfieUrl)
               }}
               onCancel={() => {
                 setCheckInSelfieDialogOpen(false)
@@ -1557,67 +1532,6 @@ export default function Dashboard() {
               required={true}
             />
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Remote Check-In Dialog */}
-      <Dialog
-        open={remoteCheckInDialogOpen}
-        onOpenChange={setRemoteCheckInDialogOpen}
-      >
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Remote Check-In</DialogTitle>
-            <DialogDescription>
-              Check in from outside the store (home, on the way, etc.). This is useful when you know you'll be late.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label>Location (Optional)</Label>
-              <Textarea
-                placeholder="e.g., Home, On the way, Remote location, etc."
-                value={remoteCheckInLocation}
-                onChange={(e) => setRemoteCheckInLocation(e.target.value)}
-                rows={2}
-                className="mt-2"
-              />
-            </div>
-            <div>
-              <Label>Reason (Optional)</Label>
-              <Textarea
-                placeholder="e.g., Running late, Working from home, Traffic, etc."
-                value={remoteCheckInReason}
-                onChange={(e) => setRemoteCheckInReason(e.target.value)}
-                rows={3}
-                className="mt-2"
-              />
-            </div>
-            <SelfieCapture
-              onCapture={(selfieUrl) => {
-                handleCheckIn(true, remoteCheckInReason.trim() || undefined, remoteCheckInLocation.trim() || undefined, selfieUrl)
-              }}
-              onCancel={() => {
-                setRemoteCheckInDialogOpen(false)
-                setRemoteCheckInReason("")
-                setRemoteCheckInLocation("")
-              }}
-              title="Take Selfie for Remote Check In"
-              required={true}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setRemoteCheckInDialogOpen(false)
-                setRemoteCheckInReason("")
-                setRemoteCheckInLocation("")
-              }}
-            >
-              Cancel
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
