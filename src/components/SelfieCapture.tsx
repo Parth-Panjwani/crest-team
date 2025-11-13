@@ -151,17 +151,34 @@ export function SelfieCapture({ onCapture, onCancel, title = "Take Selfie", requ
       
       console.log('[SelfieCapture] File created:', { name: file.name, size: file.size, type: file.type });
 
-      // Get upload URL
-      const { uploadUrl, key, fileUrl } = await store.getUploadUrl(
-        file.name,
-        file.type,
-        file.size
-      );
-      
-      console.log('[SelfieCapture] Got upload URL:', { key, fileUrl, uploadUrl: uploadUrl?.substring(0, 50) + '...' });
+      // Try to get upload URL first (for direct S3 upload)
+      let key: string;
+      try {
+        const { uploadUrl, key: uploadKey, fileUrl } = await store.getUploadUrl(
+          file.name,
+          file.type,
+          file.size
+        );
+        
+        console.log('[SelfieCapture] Got upload URL:', { key: uploadKey, fileUrl, uploadUrl: uploadUrl?.substring(0, 50) + '...' });
 
-      // Upload to S3
-      await store.uploadFileToS3(uploadUrl, file);
+        // Try direct S3 upload first
+        const uploadResult = await store.uploadFileToS3(uploadUrl, file);
+        if (uploadResult) {
+          // Server-side upload was used (returned key)
+          key = uploadResult;
+          console.log('[SelfieCapture] Server-side upload successful!');
+        } else {
+          // Direct S3 upload was successful
+          key = uploadKey;
+          console.log('[SelfieCapture] Direct S3 upload successful!');
+        }
+      } catch (error) {
+        // If getting upload URL fails, use server-side upload directly
+        console.log('[SelfieCapture] Failed to get upload URL, using server-side upload:', error);
+        key = await store.uploadFileViaServer(file);
+        console.log('[SelfieCapture] Server-side upload successful!');
+      }
       
       console.log('[SelfieCapture] Upload successful! Calling onCapture with key:', key);
 

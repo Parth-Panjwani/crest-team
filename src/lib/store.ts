@@ -1807,19 +1807,83 @@ class Store {
     uploadUrl: string,
     file: File | Blob,
     contentType?: string
-  ): Promise<void> {
-    const response = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: {
-        "Content-Type":
-          contentType ||
-          (file instanceof File ? file.type : "application/octet-stream"),
-      },
-      body: file,
-    })
-    if (!response.ok) {
-      throw new Error(`Failed to upload file: ${response.status}`)
+  ): Promise<string | void> {
+    // Try direct S3 upload first, fallback to server-side upload if CORS fails
+    try {
+      const response = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type":
+            contentType ||
+            (file instanceof File ? file.type : "application/octet-stream"),
+        },
+        body: file,
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to upload file: ${response.status}`)
+      }
+      // Direct upload successful, return void (key is already known by caller)
+      return;
+    } catch (error) {
+      // If direct upload fails (likely CORS), use server-side upload
+      console.log('[Store] Direct S3 upload failed, using server-side upload:', error);
+      // Return the key from server-side upload
+      return await this.uploadFileViaServer(file, contentType);
     }
+  }
+
+  async uploadFileViaServer(
+    file: File | Blob,
+    contentType?: string
+  ): Promise<string> {
+    // Convert file to base64
+    const fileType = contentType || (file instanceof File ? file.type : "application/octet-stream");
+    const fileName = file instanceof File ? file.name : `upload-${Date.now()}.jpg`;
+    
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Failed to convert file to base64'));
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const apiBase = import.meta.env.VITE_API_URL || ""
+    const url = apiBase
+      ? `${apiBase}/api/files/upload`
+      : "/api/files/upload"
+    
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file: base64,
+        fileName,
+        fileType,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      let errorMessage = `Failed to upload file: ${response.status}`
+      try {
+        const errorJson = JSON.parse(errorText)
+        errorMessage = errorJson.error || errorMessage
+      } catch {
+        if (errorText) {
+          errorMessage += ` - ${errorText}`
+        }
+      }
+      throw new Error(errorMessage)
+    }
+
+    const result = await response.json()
+    return result.key
   }
 
   async deleteFile(key: string): Promise<void> {

@@ -1496,6 +1496,69 @@ const handleFiles: ApiHandler = async (req, res, context) => {
     }
   }
 
+  // POST /api/files/upload - Server-side upload to avoid CORS
+  if (context.method === 'POST' && context.segments.length === 2 && context.segments[1] === 'upload') {
+    try {
+      // Get file from request body (can be base64 or FormData)
+      const body = req.body;
+      
+      // Handle base64 encoded file
+      if (body.file && body.fileName && body.fileType) {
+        const fileData = body.file;
+        const fileName = getString(body.fileName);
+        const fileType = getString(body.fileType);
+        
+        // Validate file size (max 10MB)
+        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+        
+        // Decode base64 if needed
+        let fileBuffer: Buffer;
+        if (typeof fileData === 'string') {
+          // Remove data URL prefix if present
+          const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+          fileBuffer = Buffer.from(base64Data, 'base64');
+        } else {
+          return json(res, 400, { error: 'Invalid file data format' });
+        }
+        
+        if (fileBuffer.length > MAX_FILE_SIZE) {
+          return json(res, 400, { error: 'File size exceeds maximum limit of 10MB' });
+        }
+        
+        // Generate unique file key
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 15);
+        const fileExtension = fileName.split('.').pop() || 'jpg';
+        const key = `uploads/${timestamp}-${randomString}.${fileExtension}`;
+        
+        // Upload to S3
+        const command = new PutObjectCommand({
+          Bucket: getBucketName(),
+          Key: key,
+          Body: fileBuffer,
+          ContentType: fileType,
+          CacheControl: 'max-age=31536000',
+          Metadata: {
+            originalFileName: fileName,
+            uploadedAt: new Date().toISOString(),
+          },
+        });
+        
+        await getS3Client().send(command);
+        
+        return json(res, 200, {
+          key,
+          fileUrl: getPublicFileUrl(key),
+        });
+      } else {
+        return json(res, 400, { error: 'file, fileName, and fileType are required' });
+      }
+    } catch (error) {
+      console.error('Upload file error:', error);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  }
+
   // GET /api/files/:key?expiresIn=3600
   if (context.method === 'GET' && context.segments.length === 2) {
     const key = decodeURIComponent(context.segments[1]);
