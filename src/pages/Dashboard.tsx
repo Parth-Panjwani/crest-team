@@ -65,9 +65,8 @@ export default function Dashboard() {
   const [remoteCheckInLocation, setRemoteCheckInLocation] = useState("")
   const [checkInSelfieDialogOpen, setCheckInSelfieDialogOpen] = useState(false)
   const [checkOutSelfieDialogOpen, setCheckOutSelfieDialogOpen] = useState(false)
-  const [breakSelfieDialogOpen, setBreakSelfieDialogOpen] = useState(false)
   const [pendingSelfieUrl, setPendingSelfieUrl] = useState<string | null>(null)
-  const [pendingPunchType, setPendingPunchType] = useState<'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END' | null>(null)
+  const [pendingPunchType, setPendingPunchType] = useState<'IN' | 'OUT' | null>(null)
   const [pendingApprovals, setPendingApprovals] = useState<LateApproval[]>([])
   const [pendingPermissions, setPendingPermissions] = useState<
     LatePermission[]
@@ -482,16 +481,36 @@ export default function Dashboard() {
   const handleBreakStart = () => {
     setPendingBreakType("BREAK_START")
     setBreakReason("")
-    setBreakSelfieDialogOpen(true)
+    setBreakReasonDialogOpen(true)
   }
 
-  const handleBreakEnd = () => {
-    setPendingBreakType("BREAK_END")
-    setBreakReason("")
-    setBreakSelfieDialogOpen(true)
+  const handleBreakEnd = async () => {
+    if (!user) return
+    try {
+      await store.punch(
+        user.id,
+        "BREAK_END",
+        {
+          reason: undefined,
+        }
+      )
+      // Store will auto-refresh via WebSocket, but refresh immediately for instant feedback
+      await store.refreshData()
+      toast({
+        title: "Break Ended",
+        description: "Back to work!",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to end break",
+        variant: "destructive",
+      })
+    }
   }
 
-  const confirmBreakPunch = async (selfieUrl?: string) => {
+  const confirmBreakPunch = async () => {
     if (!pendingBreakType || !user) return
     // Only require reason for break start, not break end
     if (pendingBreakType === "BREAK_START" && !breakReason.trim()) {
@@ -508,7 +527,6 @@ export default function Dashboard() {
         pendingBreakType,
         {
           reason: breakReason.trim() || undefined,
-          selfieUrl: selfieUrl,
         }
       )
       // Store will auto-refresh via WebSocket, but refresh immediately for instant feedback
@@ -522,10 +540,8 @@ export default function Dashboard() {
             : "Back to work!",
       })
       setBreakReasonDialogOpen(false)
-      setBreakSelfieDialogOpen(false)
       setBreakReason("")
       setPendingBreakType(null)
-      setPendingSelfieUrl(null)
     } catch (error) {
       toast({
         title: "Error",
@@ -1441,44 +1457,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Break Selfie Dialog */}
-      <Dialog
-        open={breakSelfieDialogOpen}
-        onOpenChange={setBreakSelfieDialogOpen}
-      >
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>
-              {pendingBreakType === "BREAK_START" ? "Start Break" : "End Break"}
-            </DialogTitle>
-            <DialogDescription>
-              {pendingBreakType === "BREAK_START"
-                ? "Take a selfie and provide a reason for this break"
-                : "Take a selfie to end your break"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <SelfieCapture
-              onCapture={(selfieUrl) => {
-                setPendingSelfieUrl(selfieUrl)
-                if (pendingBreakType === "BREAK_START") {
-                  setBreakReasonDialogOpen(true)
-                  setBreakSelfieDialogOpen(false)
-                } else {
-                  confirmBreakPunch(selfieUrl)
-                }
-              }}
-              onCancel={() => {
-                setBreakSelfieDialogOpen(false)
-                setPendingBreakType(null)
-              }}
-              title={pendingBreakType === "BREAK_START" ? "Take Selfie for Break Start" : "Take Selfie for Break End"}
-              required={true}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* Break Reason Dialog */}
       <Dialog
         open={breakReasonDialogOpen}
@@ -1510,13 +1488,12 @@ export default function Dashboard() {
                 setBreakReasonDialogOpen(false)
                 setBreakReason("")
                 setPendingBreakType(null)
-                setPendingSelfieUrl(null)
               }}
             >
               Cancel
             </Button>
             <Button
-              onClick={() => confirmBreakPunch(pendingSelfieUrl || undefined)}
+              onClick={confirmBreakPunch}
               disabled={!breakReason.trim()}
               className="gradient-primary"
             >
