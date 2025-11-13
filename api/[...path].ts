@@ -29,6 +29,8 @@ import type {
   FileAttachment,
 } from './mongodb.js';
 import admin from 'firebase-admin';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 type ApiMethod = NonNullable<VercelRequest['method']>;
 
@@ -1310,6 +1312,125 @@ const handleLateApprovals: ApiHandler = async (req, res, context) => {
   return methodNotAllowed(res, context.method, ['GET', 'PUT']);
 };
 
+// S3 Client initialization
+let s3Client: S3Client | null = null;
+
+function getS3Client(): S3Client {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: process.env.AWS_REGION || 'ap-south-1',
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+      },
+    });
+  }
+  return s3Client;
+}
+
+function getBucketName(): string {
+  return process.env.S3_BUCKET_NAME || 'employe-hub';
+}
+
+function getPublicFileUrl(key: string): string {
+  const region = process.env.AWS_REGION || 'ap-south-1';
+  return `https://${getBucketName()}.s3.${region}.amazonaws.com/${key}`;
+}
+
+const handleFiles: ApiHandler = async (req, res, context) => {
+  if (context.segments[0] !== 'files') {
+    return false;
+  }
+
+  // POST /api/files/upload-url
+  if (context.method === 'POST' && context.segments.length === 2 && context.segments[1] === 'upload-url') {
+    const body = getRequestBody(req);
+    const fileName = getString(body.fileName);
+    const fileType = getString(body.fileType);
+    const fileSize = typeof body.fileSize === 'number' ? body.fileSize : undefined;
+
+    if (!fileName || !fileType) {
+      return json(res, 400, { error: 'fileName and fileType are required' });
+    }
+
+    // Validate file size (max 10MB)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    if (fileSize && fileSize > MAX_FILE_SIZE) {
+      return json(res, 400, { error: 'File size exceeds maximum limit of 10MB' });
+    }
+
+    try {
+      // Generate unique file key
+      const timestamp = Date.now();
+      const randomString = Math.random().toString(36).substring(2, 15);
+      const fileExtension = fileName.split('.').pop() || '';
+      const key = `uploads/${timestamp}-${randomString}.${fileExtension}`;
+
+      const command = new PutObjectCommand({
+        Bucket: getBucketName(),
+        Key: key,
+        ContentType: fileType,
+        CacheControl: 'max-age=31536000',
+        Metadata: {
+          originalFileName: fileName,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      // Generate presigned URL valid for 15 minutes
+      const uploadUrl = await getSignedUrl(getS3Client(), command, { expiresIn: 900 });
+
+      return json(res, 200, {
+        uploadUrl,
+        key,
+        fileUrl: getPublicFileUrl(key),
+      });
+    } catch (error) {
+      console.error('Generate upload URL error:', error);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  }
+
+  // GET /api/files/:key?expiresIn=3600
+  if (context.method === 'GET' && context.segments.length === 2) {
+    const key = decodeURIComponent(context.segments[1]);
+    const expiresIn = req.query.expiresIn ? parseInt(getString(req.query.expiresIn) || '3600', 10) : 3600;
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: getBucketName(),
+        Key: key,
+      });
+
+      const url = await getSignedUrl(getS3Client(), command, { expiresIn });
+      return json(res, 200, { url });
+    } catch (error) {
+      console.error('Get file URL error:', error);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  }
+
+  // DELETE /api/files/:key
+  if (context.method === 'DELETE' && context.segments.length === 2) {
+    const key = decodeURIComponent(context.segments[1]);
+
+    try {
+      const command = new DeleteObjectCommand({
+        Bucket: getBucketName(),
+        Key: key,
+      });
+
+      await getS3Client().send(command);
+      return json(res, 200, { success: true, message: 'File deleted successfully' });
+    } catch (error) {
+      console.error('Delete file error:', error);
+      return json(res, 500, { error: 'Internal server error' });
+    }
+  }
+
+  return false;
+};
+
 // Helper function to parse mentions from message text
 function parseMentions(message: string, allUsers: Array<{ id: string; name: string }>): string[] {
   const mentions: string[] = [];
@@ -1677,6 +1798,7 @@ const routeHandlers: ApiHandler[] = [
   handleLatePermissions,
   handleLateApprovals,
   handleChats,
+  handleFiles,
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
